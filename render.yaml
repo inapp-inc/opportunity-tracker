@@ -1,0 +1,23 @@
+# Render Blueprint: one Web service (Express API + Vite build served as static SPA).
+# Dashboard: New → Blueprint → connect repo, or paste this file.
+#
+# After deploy, set in Render Environment:
+#   JWT_SECRET           (required — long random string)
+#   STATIC_AUTH_EMAIL    (optional bootstrap admin)
+#   STATIC_AUTH_PASSWORD
+#
+# Optional persistent SQLite (recommended): add a Disk mount at /var/data and set:
+#   DATA_DIR=/var/data
+#
+services:
+  - type: web
+    name: presales-opportunity-tracker
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install --prefix web && npm run build --prefix web && npm install --prefix server
+    startCommand: cd server && NODE_ENV=production node src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production

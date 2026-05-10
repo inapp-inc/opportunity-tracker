@@ -2,8 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { db, migrate } from './db.js';
 import { hashPassword, verifyPassword } from './auth-utils.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
@@ -22,6 +27,18 @@ function requireRoles(...roles) {
   };
 }
 
+/** Paths handled by the JSON API (require Bearer token except as noted). */
+function isApiPath(p) {
+  if (p === '/auth/me') return true;
+  if (p.startsWith('/opportunities')) return true;
+  if (p.startsWith('/notifications')) return true;
+  if (p.startsWith('/reports')) return true;
+  if (p.startsWith('/settings')) return true;
+  if (p.startsWith('/users')) return true;
+  if (p.startsWith('/export')) return true;
+  return false;
+}
+
 migrate();
 seedUsersIfEmpty();
 seedLookupsIfEmpty();
@@ -29,13 +46,19 @@ seedDefaultAppConfigIfEmpty();
 seedIfEmpty();
 
 const app = express();
+app.set('trust proxy', 1);
+
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: true,
     credentials: true,
   })
 );
 app.use(express.json({ limit: '1mb' }));
+
+app.get('/health', (_req, res) => {
+  res.status(200).type('text/plain').send('ok');
+});
 
 app.post('/auth/login', (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
@@ -774,8 +797,21 @@ app.get('/export/reports/pipeline-summary.csv', (req, res) => {
   res.send(lines.join('\n'));
 });
 
-app.listen(PORT, () => {
-  console.log(`API listening on http://localhost:${PORT}`);
+const webDist = path.join(__dirname, '../../web/dist');
+const serveStatic =
+  fs.existsSync(webDist) &&
+  (process.env.NODE_ENV === 'production' || process.env.SERVE_STATIC === '1');
+if (serveStatic) {
+  app.use(express.static(webDist));
+  app.get('*', (req, res, next) => {
+    if (req.method !== 'GET') return next();
+    if (isApiPath(req.path)) return next();
+    res.sendFile(path.join(webDist, 'index.html'));
+  });
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Listening on port ${PORT}${serveStatic ? ' (API + static SPA)' : ' (API only)'}`);
 });
 
 setInterval(runNotificationEvaluator, 60 * 1000);
@@ -783,6 +819,8 @@ runNotificationEvaluator();
 
 function authMiddleware(req, res, next) {
   if (req.path === '/auth/login') return next();
+  if (req.path === '/health') return next();
+  if (req.method === 'GET' && !isApiPath(req.path)) return next();
   const h = req.headers.authorization || '';
   const m = /^Bearer\s+(.+)$/i.exec(h);
   if (!m) return res.status(401).json({ message: 'Unauthorized' });
