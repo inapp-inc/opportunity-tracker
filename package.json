@@ -1,0 +1,15 @@
+{
+  "name": "presales-opportunity-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Unified dev runner for API + web",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev --prefix server\" \"npm run dev --prefix web\"",
+    "start": "concurrently -k -n api,web -c cyan,magenta \"npm run start --prefix server\" \"npm run dev --prefix web\"",
+    "install:all": "npm install --prefix server --no-fund --no-audit && npm install --prefix web --no-fund --no-audit",
+    "setup": "npm install --no-fund --no-audit && npm run install:all"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
