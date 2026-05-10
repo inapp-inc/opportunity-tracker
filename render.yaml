@@ -15,7 +15,8 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: npm install --prefix web && npm run build --prefix web && npm install --prefix server
+    # npm ci + rebuild: ensures Linux Rollup binary + native better-sqlite3 on Render (do not commit node_modules).
+    buildCommand: npm ci --prefix web && npm run build --prefix web && npm ci --prefix server && npm rebuild better-sqlite3 --prefix server
     startCommand: cd server && NODE_ENV=production node src/index.js
     healthCheckPath: /health
     envVars:
