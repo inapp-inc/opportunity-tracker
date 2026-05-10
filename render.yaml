@@ -15,9 +15,10 @@ services:
     runtime: node
     plan: free
     region: oregon
-    # npm ci + rebuild: ensures Linux Rollup binary + native better-sqlite3 on Render (do not commit node_modules).
-    buildCommand: npm ci --prefix web && npm run build --prefix web && npm ci --prefix server && npm rebuild better-sqlite3 --prefix server
-    startCommand: cd server && NODE_ENV=production node src/index.js
+    # Uses scripts so both flat (web/, server/) and nested (src/web/, src/server/) repos work.
+    # Dashboard must match: Build = `bash scripts/render-build.sh`, Start = `bash scripts/render-start.sh`
+    buildCommand: bash scripts/render-build.sh
+    startCommand: bash scripts/render-start.sh
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
