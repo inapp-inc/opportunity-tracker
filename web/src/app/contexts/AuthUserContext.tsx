@@ -7,12 +7,34 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { apiFetch } from '../lib/api';
+import { ACTIVE_TENANT_EVENT, apiFetch, getActiveTenantId, setActiveTenantId } from '../lib/api';
+import type { PageAccessConfig } from '../lib/pageAccess';
+
+export type TenantMembership = {
+  id: string;
+  userId: string;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  role: 'TENANT_ADMIN' | 'MANAGER' | 'VIEWER';
+  permissions: string[];
+  status: string;
+};
 
 export type AuthUser = {
   sub: string;
   email: string;
+  name?: string;
   role: string;
+  tenantRole?: TenantMembership['role'];
+  platformRole: 'PLATFORM_ADMIN' | 'NONE';
+  tenantId: string;
+  tenantName: string;
+  activeTenantId: string;
+  activeTenantName: string;
+  memberships: TenantMembership[];
+  permissions: string[];
+  pageAccess?: PageAccessConfig;
 };
 
 type AuthUserContextValue = {
@@ -20,6 +42,7 @@ type AuthUserContextValue = {
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
+  switchTenant: (tenantId: string) => Promise<void>;
 };
 
 const AuthUserContext = createContext<AuthUserContextValue | null>(null);
@@ -34,6 +57,9 @@ export function AuthUserProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const me = await apiFetch<AuthUser>('/auth/me');
+      if (me.activeTenantId && !getActiveTenantId()) {
+        setActiveTenantId(me.activeTenantId);
+      }
       setUser(me);
     } catch (e) {
       setUser(null);
@@ -43,13 +69,29 @@ export function AuthUserProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const switchTenant = useCallback(
+    async (tenantId: string) => {
+      setActiveTenantId(tenantId);
+      await refetch();
+    },
+    [refetch]
+  );
+
   useEffect(() => {
     void refetch();
   }, [refetch]);
 
+  useEffect(() => {
+    const onTenantChange = () => {
+      void refetch();
+    };
+    window.addEventListener(ACTIVE_TENANT_EVENT, onTenantChange);
+    return () => window.removeEventListener(ACTIVE_TENANT_EVENT, onTenantChange);
+  }, [refetch]);
+
   const value = useMemo(
-    () => ({ user, loading, error, refetch }),
-    [user, loading, error, refetch]
+    () => ({ user, loading, error, refetch, switchTenant }),
+    [user, loading, error, refetch, switchTenant]
   );
 
   return (

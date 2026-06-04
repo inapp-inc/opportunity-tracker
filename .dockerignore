@@ -1,0 +1,16 @@
+.git
+.env
+*.env
+**/.env
+**/*.env
+.DS_Store
+**/.DS_Store
+node_modules
+**/node_modules
+web/dist
+server/data
+server/.tmp-*
+*.log
+*.zip
+Dockerfile
+.dockerignore

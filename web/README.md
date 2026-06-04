@@ -1,7 +1,7 @@
 
-  # Presales Opportunity Tracking UI
+  # Opportunity Tracker
 
-  This is a code bundle for Presales Opportunity Tracking UI. The original project is available at https://www.figma.com/design/LxgE5Qv5mlfFEuafcJAPGa/Presales-Opportunity-Tracking-UI.
+  This is a code bundle for Opportunity Tracker. The original project is available at https://www.figma.com/design/LxgE5Qv5mlfFEuafcJAPGa/Presales-Opportunity-Tracking-UI.
 
   ## Running the code
 

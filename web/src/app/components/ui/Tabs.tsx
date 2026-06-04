@@ -1,4 +1,5 @@
 import { useState, createContext, useContext } from "react";
+import { cn } from "./utils";
 
 interface TabsContextType {
   activeTab: string;
@@ -9,14 +10,24 @@ const TabsContext = createContext<TabsContextType | undefined>(undefined);
 
 export function Tabs({
   defaultValue,
+  value,
+  onValueChange,
   children,
   className = "",
 }: {
   defaultValue: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
   children: React.ReactNode;
   className?: string;
 }) {
-  const [activeTab, setActiveTab] = useState(defaultValue);
+  const [internalTab, setInternalTab] = useState(defaultValue);
+  const isControlled = value !== undefined;
+  const activeTab = isControlled ? value : internalTab;
+  const setActiveTab = (next: string) => {
+    if (!isControlled) setInternalTab(next);
+    onValueChange?.(next);
+  };
 
   return (
     <TabsContext.Provider value={{ activeTab, setActiveTab }}>
@@ -33,7 +44,7 @@ export function TabsList({
   className?: string;
 }) {
   return (
-    <div className={`flex gap-1 border-b border-border ${className}`}>
+    <div className={cn("flex gap-1 overflow-x-auto rounded-xl bg-muted p-1", className)}>
       {children}
     </div>
   );
@@ -57,11 +68,13 @@ export function TabsTrigger({
   return (
     <button
       onClick={() => setActiveTab(value)}
-      className={`px-4 py-2 -mb-px transition-colors ${
+      className={cn(
+        "whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-all",
         isActive
-          ? "border-b-2 border-primary text-primary"
-          : "text-muted-foreground hover:text-foreground"
-      } ${className}`}
+          ? "bg-card text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
+        className
+      )}
     >
       {children}
     </button>
@@ -84,5 +97,5 @@ export function TabsContent({
 
   if (activeTab !== value) return null;
 
-  return <div className={`pt-4 ${className}`}>{children}</div>;
+  return <div className={cn("pt-5", className)}>{children}</div>;
 }

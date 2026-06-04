@@ -5,12 +5,17 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Bell, Clock, AlertTriangle, CheckCircle, ExternalLink, RefreshCw } from "lucide-react";
+import { Bell, Clock, AlertTriangle, CheckCircle, RefreshCw } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { lowerFirst, useTerminology } from "../lib/terminology";
+import { PageHeader, Toolbar, LoadingDisplay } from "../components/shared";
+import { PageLayoutEditor } from "../components/page-layout/PageLayoutEditor";
+import { NotificationsLayoutPanel } from "../components/page-layout/panels/NotificationsLayoutPanel";
+import { useCanManageTenantSettings, useIsPlatformAdmin } from "../lib/roles";
 
 interface Notification {
   id: string;
-  type: "reminder" | "overdue" | "status_change" | "artifact_added";
+  type: "reminder" | "overdue";
   title: string;
   message: string;
   opportunityId: string;
@@ -21,6 +26,10 @@ interface Notification {
 }
 
 export function NotificationsCenter() {
+  const terminology = useTerminology();
+  const canManageTenantSettings = useCanManageTenantSettings();
+  const isPlatformAdmin = useIsPlatformAdmin();
+  const canEditLayouts = canManageTenantSettings || isPlatformAdmin;
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [filterType, setFilterType] = useState("all");
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
@@ -79,10 +88,6 @@ export function NotificationsCenter() {
         return <AlertTriangle className="w-5 h-5 text-red-600" />;
       case "reminder":
         return <Clock className="w-5 h-5 text-yellow-600" />;
-      case "status_change":
-        return <CheckCircle className="w-5 h-5 text-green-600" />;
-      case "artifact_added":
-        return <ExternalLink className="w-5 h-5 text-blue-600" />;
       default:
         return <Bell className="w-5 h-5" />;
     }
@@ -92,33 +97,31 @@ export function NotificationsCenter() {
     const labels: Record<Notification["type"], string> = {
       overdue: "Overdue",
       reminder: "Reminder",
-      status_change: "Status Update",
-      artifact_added: "Artifact",
     };
 
-    const variants: Record<
-      Notification["type"],
-      "danger" | "warning" | "success" | "info"
-    > = {
+    const variants: Record<Notification["type"], "danger" | "warning"> = {
       overdue: "danger",
       reminder: "warning",
-      status_change: "success",
-      artifact_added: "info",
     };
 
     return <Badge variant={variants[type]}>{labels[type]}</Badge>;
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1>Notifications</h1>
-          <p className="text-muted-foreground">
-            Stay updated on opportunity reminders and changes
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="mx-auto max-w-screen-2xl space-y-6 p-6">
+      <PageHeader
+        title="Notifications"
+        description={`Stay updated on ${lowerFirst(terminology.recordSingular)} reminders and changes`}
+        actions={
+        <div className="flex flex-wrap items-center gap-2">
+          {!canEditLayouts ? null : (
+            <PageLayoutEditor
+              title="Notification settings"
+              description="Reminder schedules, display timezone, and Case Study visibility for this workspace."
+            >
+              <NotificationsLayoutPanel />
+            </PageLayoutEditor>
+          )}
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -130,7 +133,8 @@ export function NotificationsCenter() {
             </Button>
           )}
         </div>
-      </div>
+        }
+      />
 
       {loadError && (
         <p className="text-sm text-destructive border border-destructive/40 rounded-lg p-3">
@@ -138,7 +142,7 @@ export function NotificationsCenter() {
         </p>
       )}
 
-      <div className="flex flex-col sm:flex-row gap-4">
+      <Toolbar>
         <Select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
@@ -146,12 +150,10 @@ export function NotificationsCenter() {
             { value: "all", label: "All Types" },
             { value: "overdue", label: "Overdue" },
             { value: "reminder", label: "Reminders" },
-            { value: "status_change", label: "Status Changes" },
-            { value: "artifact_added", label: "Artifacts" },
           ]}
         />
 
-        <label className="flex items-center gap-2 px-4 py-2 bg-input-background rounded-lg border border-border cursor-pointer">
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-input-background px-4 py-2 text-sm">
           <input
             type="checkbox"
             checked={showUnreadOnly}
@@ -160,9 +162,11 @@ export function NotificationsCenter() {
           />
           <span>Show unread only</span>
         </label>
-      </div>
+      </Toolbar>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <LoadingDisplay message="Loading notifications..." />
+      ) : filtered.length === 0 ? (
         <EmptyState
           icon={Bell}
           title={loading ? "Loading…" : "No notifications"}
@@ -210,7 +214,7 @@ export function NotificationsCenter() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <Link to={`/app/opportunities/${notification.opportunityId}`}>
                       <Button variant="outline" size="sm">
-                        View Opportunity
+                        View {terminology.recordSingular}
                       </Button>
                     </Link>
                     {!notification.isRead && (

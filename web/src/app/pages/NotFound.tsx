@@ -1,8 +1,10 @@
 import { Link } from "react-router";
 import { Button } from "../components/ui/Button";
 import { Home } from "lucide-react";
+import { useTerminology } from "../lib/terminology";
 
 export function NotFound() {
+  const terminology = useTerminology();
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="text-center">
@@ -14,7 +16,7 @@ export function NotFound() {
         <Link to="/app">
           <Button>
             <Home className="w-4 h-4" />
-            Go to Dashboard
+            Go to {terminology.dashboardLabel || "Dashboard"}
           </Button>
         </Link>
       </div>

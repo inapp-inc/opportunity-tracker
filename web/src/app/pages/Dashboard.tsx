@@ -1,22 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { PageLayoutEditor } from "../components/page-layout/PageLayoutEditor";
+import { DashboardLayoutPanel } from "../components/page-layout/panels/DashboardLayoutPanel";
+import { SummaryCardsPanel } from "../components/page-layout/panels/SummaryCardsPanel";
+import { WORKSPACE_LAYOUT_EVENT } from "../lib/pageLayoutEvents";
+import { Link, useNavigate } from "react-router";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
-import { Badge } from "../components/ui/Badge";
-import {
-  DollarSign,
-  Briefcase,
-  AlertTriangle,
-  Plus,
-  Clock,
-  ArrowRight,
-  BarChart3,
-} from "lucide-react";
+import { AlertCircle, CheckCircle2, Briefcase, Plus, TrendingUp, BarChart3, Download } from "lucide-react";
 import {
   BarChart,
   Bar,
-  LineChart,
-  Line,
   PieChart,
   Pie,
   Cell,
@@ -24,382 +17,573 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from "recharts";
+import {
+  TenantPermissions,
+  useCanEdit,
+  useCanManageTenantSettings,
+  useIsPlatformAdmin,
+  useTenantPermission,
+} from "../lib/roles";
+import { PageHeader, StatCard } from "../components/shared";
 import { apiFetch } from "../lib/api";
-import { useCanEdit } from "../lib/roles";
+import {
+  fieldLabelsForDashboard,
+  formatDashboardMetric,
+  groupRecordsByField,
+  recordFieldValue,
+  type DashboardWidget,
+} from "../lib/dashboard";
+import { useDashboardData } from "../lib/serverState";
+import { downloadWithAuth } from "../lib/download";
+import { formatMoney } from "../lib/format";
+import { opportunitiesDrilldownUrl, reportsDrilldownUrl } from "../lib/drilldown";
+import type { ApiOpportunity } from "../lib/opportunity";
+import { useAuthUser } from "../contexts/AuthUserContext";
+import { computeSummaryCards } from "../lib/summaryCards";
+import { LoadingDisplay, ErrorDisplay } from "../components/shared/StateDisplay";
 
-type ApiOpp = {
-  id: string;
-  prospect: string;
-  opportunityDescription: string;
-  ownerIds: string[];
-  deliverables: string[];
-  dueDate: string;
-  status: string;
-  winOrLoss: string;
-  value: number;
-  currency: string;
-  closedDate?: string | null;
-};
+type DashboardScope = "me" | "workspace";
 
-type PipelineSummary = {
-  totalsByStatus: { status: string; count: number; totalValue: number }[];
-  countsByOwner: { ownerId: string; count: number; totalValue: number }[];
-};
+const COLORS = ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4"];
 
-const COLORS = ["#0088FE", "#00C49F", "#FFBB28"];
-
-function startOfDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x.getTime();
+function startOfDay(value: Date) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
 }
 
-function daysUntilDue(dueIso: string) {
-  const due = new Date(dueIso + "T12:00:00");
-  const today = new Date();
-  return Math.round((startOfDay(due) - startOfDay(today)) / 86400000);
+function primaryCurrency(records: ApiOpportunity[]) {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    const code = String(record.currency || "USD").toUpperCase();
+    counts.set(code, (counts.get(code) || 0) + 1);
+  }
+  let best = "USD";
+  let max = 0;
+  for (const [code, count] of counts) {
+    if (count > max) {
+      max = count;
+      best = code;
+    }
+  }
+  return best;
 }
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const canEdit = useCanEdit();
-  const [opportunities, setOpportunities] = useState<ApiOpp[]>([]);
-  const [summary, setSummary] = useState<PipelineSummary | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const canManageTenantSettings = useCanManageTenantSettings();
+  const isPlatformAdmin = useIsPlatformAdmin();
+  const { user } = useAuthUser();
+  const canEditLayouts = canManageTenantSettings || isPlatformAdmin;
+  // Toggling between "workspace" and "me" is safe for any user who can read records.
+  // Previously this was limited to admins, which caused viewers to be stuck on "me"
+  // and see 0 records if they weren’t set as owners.
+  const canToggleScope = useTenantPermission(TenantPermissions.recordsRead);
+  const dashboardScopeKey = `pt_dashboard_scope:${user?.sub || "anon"}:${
+    user?.activeTenantId || user?.tenantId || "tenant"
+  }`;
+
+  const [scope, setScope] = useState<DashboardScope>(() => {
+    if (!canToggleScope) return "workspace";
+    try {
+      const saved = localStorage.getItem(dashboardScopeKey);
+      return saved === "workspace" ? "workspace" : "me";
+    } catch {
+      return "workspace";
+    }
+  });
+
+  useEffect(() => {
+    if (!canToggleScope) {
+      setScope("workspace");
+      return;
+    }
+    try {
+      localStorage.setItem(dashboardScopeKey, scope);
+    } catch {
+      // ignore storage failures
+    }
+  }, [canToggleScope, dashboardScopeKey, scope]);
+
+  const [layoutReloadToken, setLayoutReloadToken] = useState(0);
+
+  useEffect(() => {
+    const onLayout = (event: Event) => {
+      const detail = (event as CustomEvent<{ page?: string }>).detail;
+      if (!detail?.page || detail.page === "dashboard" || detail.page === "summary-cards") {
+        setLayoutReloadToken((t) => t + 1);
+      }
+    };
+    window.addEventListener(WORKSPACE_LAYOUT_EVENT, onLayout);
+    return () => window.removeEventListener(WORKSPACE_LAYOUT_EVENT, onLayout);
+  }, []);
+
+  const {
+    opportunities,
+    schemaFields,
+    dashboardConfig,
+    terminology,
+    summaryCards,
+    loading,
+    error: loadError,
+  } = useDashboardData({ scope, reloadToken: layoutReloadToken });
+
+  const activeRecords = useMemo(
+    () => opportunities.filter((record) => !record.archived),
+    [opportunities]
+  );
+
+  const currencyCode = useMemo(
+    () => primaryCurrency(activeRecords),
+    [activeRecords]
+  );
+
+  const dashboardSummaryCards = useMemo(
+    () =>
+      computeSummaryCards({
+        config: summaryCards,
+        records: activeRecords,
+        currencyCode,
+        schemaFields,
+      }),
+    [summaryCards, activeRecords, currencyCode, schemaFields]
+  );
+
+  const fieldLabels = useMemo(() => {
+    return fieldLabelsForDashboard(schemaFields);
+  }, [schemaFields]);
+
+  const [analyticsByWidget, setAnalyticsByWidget] = useState<
+    Record<string, { rows: any[]; totals?: Record<string, any> }>
+  >({});
+  const [analyticsLoadError, setAnalyticsLoadError] = useState<string | null>(null);
+
+  function analyticsDimensionKey(field: string | undefined): string | null {
+    if (!field) return null;
+    if (field === "dueDate") return "dueMonth";
+    if (field.startsWith("custom:")) return field;
+    const allowed = [
+      "status",
+      "dealStage",
+      "winOrLoss",
+      "prospectType",
+      "engagementType",
+      "owner",
+      "currency",
+    ];
+    return allowed.includes(field) ? field : null;
+  }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setAnalyticsLoadError(null);
+      setAnalyticsByWidget({});
+
       try {
-        const [oppRes, sumRes] = await Promise.all([
-          apiFetch<{ items: ApiOpp[] }>("/opportunities"),
-          apiFetch<PipelineSummary>(
-            "/reports/pipeline-summary?fromDate=2000-01-01&toDate=2099-12-31"
-          ),
-        ]);
-        if (!cancelled) {
-          setOpportunities(oppRes.items);
-          setSummary(sumRes);
-          setLoadError(null);
+        const analyticsBaseFilters: Record<string, unknown> = { archived: "exclude" };
+        if (scope === "me" && user?.sub) {
+          analyticsBaseFilters.ownerId = user.sub;
         }
+        const supported = dashboardConfig.widgets
+          .map((widget) => {
+            if (widget.type === "bar" || widget.type === "pie") {
+              const dim = analyticsDimensionKey(widget.field);
+              if (!dim) return null;
+              return {
+                widgetId: widget.id,
+                promise: apiFetch<{ rows: any[]; totals?: Record<string, any> }>(
+                  "/analytics/query",
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      filters: analyticsBaseFilters,
+                      groupBy: [dim],
+                      measures: ["count"],
+                      limit: widget.limit || 8,
+                    }),
+                  }
+                ),
+              };
+            }
+
+            if (widget.type === "metric_count") {
+              return {
+                widgetId: widget.id,
+                promise: apiFetch<{ rows: any[]; totals?: Record<string, any> }>(
+                  "/analytics/query",
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      filters: analyticsBaseFilters,
+                      groupBy: ["status"],
+                      measures: ["count"],
+                      limit: 50,
+                    }),
+                  }
+                ),
+              };
+            }
+
+            if (
+              (widget.type === "metric_sum" || widget.type === "metric_avg") &&
+              widget.field === "value"
+            ) {
+              const measures =
+                widget.type === "metric_sum"
+                  ? ["sumValue"]
+                  : ["count", "sumValue", "avgValue"];
+              return {
+                widgetId: widget.id,
+                promise: apiFetch<{ rows: any[]; totals?: Record<string, any> }>(
+                  "/analytics/query",
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      filters: analyticsBaseFilters,
+                      groupBy: ["status"],
+                      measures,
+                      limit: 50,
+                    }),
+                  }
+                ),
+              };
+            }
+
+            return null;
+          })
+          .filter(Boolean) as { widgetId: string; promise: Promise<any> }[];
+
+        const results = await Promise.all(supported.map((s) => s.promise));
+        if (cancelled) return;
+
+        const next: typeof analyticsByWidget = {};
+        for (let i = 0; i < supported.length; i++) {
+          next[supported[i].widgetId] = results[i];
+        }
+        setAnalyticsByWidget(next);
       } catch (e) {
         if (!cancelled) {
-          setLoadError(e instanceof Error ? e.message : "Failed to load dashboard");
+          setAnalyticsLoadError(
+            e instanceof Error ? e.message : "Failed to load analytics"
+          );
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dashboardConfig, schemaFields, scope, user?.sub]);
 
-  const kpiData = useMemo(() => {
-    const totalOpportunities = opportunities.length;
-    const totalValue = opportunities.reduce((s, o) => s + (o.value || 0), 0);
-    const overdueCount = opportunities.filter(
-      (o) => o.status !== "Completed" && daysUntilDue(o.dueDate) < 0
+  const dashboardStats = useMemo(() => {
+    const totalValue = activeRecords.reduce(
+      (sum, record) => sum + Number(record.value || 0),
+      0
+    );
+    const completed = activeRecords.filter(
+      (record) => record.status === "Completed"
     ).length;
-    const wins = opportunities.filter((o) => o.winOrLoss === "Win").length;
-    const losses = opportunities.filter((o) => o.winOrLoss === "Loss").length;
-    const denom = wins + losses;
-    const winRate =
-      denom > 0 ? Math.round((wins / denom) * 1000) / 10 : 0;
+    const overdue = activeRecords.filter((record) => {
+      if (record.status === "Completed" || !record.dueDate) return false;
+      return (
+        startOfDay(new Date(`${record.dueDate}T12:00:00`)) < startOfDay(new Date())
+      );
+    }).length;
+    return {
+      activeCount: activeRecords.length,
+      totalValue,
+      completed,
+      overdue,
+    };
+  }, [activeRecords]);
 
-    return { totalOpportunities, totalValue, overdueCount, winRate };
-  }, [opportunities]);
+  const handleDrilldown = (field: string | undefined, bucket: string) => {
+    navigate(
+      opportunitiesDrilldownUrl(field, bucket, {
+        mine: scope === "me",
+        ownerId: scope === "me" ? user?.sub : undefined,
+      })
+    );
+  };
 
-  const alertsData = useMemo(() => {
-    return [...opportunities]
-      .filter((o) => o.status !== "Completed")
-      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-      .slice(0, 6)
-      .map((o) => ({
-        id: o.id,
-        prospect: o.prospect,
-        description: o.opportunityDescription,
-        dueDate: o.dueDate,
-        daysUntil: daysUntilDue(o.dueDate),
-        status: o.status,
-      }));
-  }, [opportunities]);
-
-  const valueByStatusData =
-    summary?.totalsByStatus.map((t) => ({
-      name: t.status,
-      value: t.totalValue,
-    })) ?? [];
-
-  const countByOwnerData =
-    summary?.countsByOwner.map((c) => ({
-      name: c.ownerId,
-      count: c.count,
-    })) ?? [];
-
-  const trendData = useMemo(() => {
-    const buckets = new Map<string, { month: string; wins: number; losses: number }>();
-    for (const o of opportunities) {
-      if (!o.closedDate || o.winOrLoss === "Open") continue;
-      const m = o.closedDate.slice(0, 7);
-      if (!m) continue;
-      if (!buckets.has(m)) {
-        buckets.set(m, {
-          month: m,
-          wins: 0,
-          losses: 0,
-        });
-      }
-      const b = buckets.get(m)!;
-      if (o.winOrLoss === "Win") b.wins++;
-      else if (o.winOrLoss === "Loss") b.losses++;
+  const renderWidget = (widget: DashboardWidget) => {
+    if (widget.type === "metric_count") {
+      const count =
+        analyticsByWidget[widget.id]?.totals?.count ?? dashboardStats.activeCount;
+      return (
+        <Card
+          key={widget.id}
+          className="overflow-hidden hover:shadow-md cursor-pointer"
+          onClick={() =>
+            navigate(scope === "me" ? "/app/opportunities?mine=1" : "/app/opportunities")
+          }
+        >
+          <CardContent>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                {widget.title}
+              </p>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10">
+                <Briefcase className="w-5 h-5 text-blue-600" />
+              </div>
+            </div>
+            <p className="text-3xl font-bold tabular-nums mb-1">
+              {count.toLocaleString()}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Active {terminology.recordPlural.toLowerCase()} in this workspace
+            </p>
+          </CardContent>
+        </Card>
+      );
     }
-    return [...buckets.values()].sort((a, b) => a.month.localeCompare(b.month));
-  }, [opportunities]);
 
-  return (
-    <div className="p-6 space-y-6">
-      {loadError ? (
-        <div className="p-4 border border-red-300 rounded-lg text-red-800 bg-red-50 dark:bg-red-900/30 dark:text-red-100">
-          {loadError}
-        </div>
-      ) : null}
-
-      <div className="flex items-center justify-between">
-        <div>
-          <h1>Dashboard</h1>
-          <p className="text-muted-foreground">
-            Welcome back! Here&apos;s your presales overview.
-          </p>
-        </div>
-        {canEdit ? (
-          <Link to="/app/opportunities/new">
-            <Button>
-              <Plus className="w-4 h-4" />
-              New Opportunity
-            </Button>
-          </Link>
-        ) : null}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm text-muted-foreground">Total Opportunities</p>
-              <Briefcase className="w-5 h-5 text-muted-foreground" />
-            </div>
-            <p className="text-3xl mb-1">{kpiData.totalOpportunities}</p>
-            <p className="text-sm text-muted-foreground">
-              Loaded from SQLite
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm text-muted-foreground">Pipeline Value</p>
-              <DollarSign className="w-5 h-5 text-muted-foreground" />
-            </div>
-            <p className="text-3xl mb-1">
-              ${(kpiData.totalValue / 1000000).toFixed(2)}M
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Sum of opportunity.value
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm text-muted-foreground">Overdue</p>
-              <AlertTriangle className="w-5 h-5 text-destructive" />
-            </div>
-            <p className="text-3xl mb-1">{kpiData.overdueCount}</p>
-            <Link to="/app/opportunities?filter=overdue">
-              <p className="text-sm text-primary hover:underline">View all</p>
-            </Link>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm text-muted-foreground">Win Rate</p>
-            </div>
-            <p className="text-3xl mb-1">
-              {kpiData.winRate ? `${kpiData.winRate}%` : "–"}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Wins ÷ (wins + losses) from current data
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Upcoming & Overdue Opportunities</CardTitle>
-          </CardHeader>
+    if (widget.type === "metric_sum" || widget.type === "metric_avg") {
+      const analyticsRes = analyticsByWidget[widget.id]?.totals;
+      const value =
+        widget.field === "value"
+          ? widget.type === "metric_sum"
+            ? Number(analyticsRes?.sumValue ?? 0)
+            : Number(analyticsRes?.avgValue ?? 0)
+          : (() => {
+              const nums = activeRecords
+                .map((o) => Number(recordFieldValue(o, widget.field)))
+                .filter((n) => !Number.isNaN(n));
+              const sum = nums.reduce((a, b) => a + b, 0);
+              return widget.type === "metric_avg"
+                ? sum / (nums.length || 1)
+                : sum;
+            })();
+      return (
+        <Card
+          key={widget.id}
+          className="overflow-hidden hover:shadow-md cursor-pointer"
+          onClick={() => navigate("/app/reports")}
+        >
           <CardContent>
-            <div className="space-y-4">
-              {alertsData.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No active opportunities loaded.
-                </p>
-              ) : (
-              alertsData.map((alert) => (
-                <div
-                  key={alert.id}
-                  className="flex items-start justify-between p-4 border border-border rounded-lg hover:bg-accent/50 transition-colors"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h4>{alert.prospect}</h4>
-                      {alert.daysUntil < 0 ? (
-                        <Badge variant="danger">Overdue</Badge>
-                      ) : alert.daysUntil <= 3 ? (
-                        <Badge variant="warning">Due Soon</Badge>
-                      ) : null}
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      {alert.description}
-                    </p>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-4 h-4" />
-                        Due {alert.dueDate}
-                      </span>
-                      <Badge variant="info">{alert.status}</Badge>
-                    </div>
-                  </div>
-                  <Link to={`/app/opportunities/${alert.id}`}>
-                    <Button variant="ghost" size="sm">
-                      <ArrowRight className="w-4 h-4" />
-                    </Button>
-                  </Link>
-                </div>
-              )))}
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                {widget.title}
+              </p>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
+                <TrendingUp className="w-5 h-5 text-emerald-600" />
+              </div>
             </div>
-            <Link to="/app/opportunities">
-              <Button variant="outline" className="w-full mt-4">
-                View All Opportunities
-              </Button>
-            </Link>
+            <p className="text-3xl font-bold tabular-nums mb-1">
+              {formatDashboardMetric(value, widget.field, currencyCode)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {widget.type === "metric_avg" ? "Average" : "Sum"} of{" "}
+              {fieldLabels[widget.field || ""] || widget.field}
+            </p>
           </CardContent>
         </Card>
+      );
+    }
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {canEdit ? (
-              <Link to="/app/opportunities/new" className="block">
-                <Button variant="outline" className="w-full justify-start">
-                  <Plus className="w-4 h-4" />
-                  New Opportunity
-                </Button>
-              </Link>
-            ) : null}
-            <Link to="/app/opportunities?filter=overdue" className="block">
-              <Button variant="outline" className="w-full justify-start">
-                <AlertTriangle className="w-4 h-4" />
-                View Overdue ({kpiData.overdueCount})
-              </Button>
-            </Link>
-            <Link to="/app/reports" className="block">
-              <Button variant="outline" className="w-full justify-start">
-                <BarChart3 className="w-4 h-4" />
-                View Reports
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Pipeline Value by Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {valueByStatusData.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No data yet.</p>
-            ) : (
+    const dimKey = analyticsDimensionKey(widget.field);
+    const analyticsRows = analyticsByWidget[widget.id]?.rows;
+    const data =
+      dimKey && Array.isArray(analyticsRows) && analyticsRows.length
+        ? analyticsRows.map((r) => ({
+            name: String(r[dimKey] ?? "Unspecified"),
+            count: Number(r.count || 0),
+          }))
+        : groupRecordsByField(activeRecords, widget.field, widget.limit || 8);
+    return (
+      <Card key={widget.id} className="overflow-hidden hover:shadow-md">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>{widget.title}</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                {fieldLabels[widget.field || ""] || widget.field || "Breakdown"} — click a segment to view matching records
+              </p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted">
+              <TrendingUp className="h-4 w-4 text-primary" />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-4">
+          {data.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No data yet.</p>
+          ) : widget.type === "pie" ? (
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
-                  data={valueByStatusData}
+                  data={data}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={(entry) =>
-                    `${entry.name}: $${((entry.value as number) / 1000000).toFixed(2)}M`
-                  }
+                  label={(entry) => `${entry.name}: ${entry.count}`}
                   outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
+                  dataKey="count"
+                  className="cursor-pointer"
+                  onClick={(_, index) => {
+                    const entry = data[index];
+                    if (entry) handleDrilldown(widget.field, entry.name);
+                  }}
                 >
-                  {valueByStatusData.map((entry, index) => (
-                    <Cell key={`cell-${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
+                  {data.map((entry, index) => (
+                    <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number) => `$${(value / 1000000).toFixed(2)}M`} />
+                <Tooltip />
               </PieChart>
             </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Opportunities by Owner</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {countByOwnerData.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No owner rollups.</p>
-            ) : (
+          ) : (
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={countByOwnerData}>
+              <BarChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
-                <YAxis />
+                <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#0088FE" />
+                <Bar
+                  dataKey="count"
+                  fill={COLORS[0]}
+                  radius={[6, 6, 0, 0]}
+                  className="cursor-pointer"
+                  onClick={(bar) => {
+                    const name = String(bar?.payload?.name || "");
+                    if (name) handleDrilldown(widget.field, name);
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link to={reportsDrilldownUrl(widget.field, "all")}>
+              <Button variant="outline" size="sm">
+                <BarChart3 className="w-4 h-4" />
+                Open report
+              </Button>
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Win/Loss by Close Month</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {trendData.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
-                Add closed dates and Win/Loss on opportunities to populate this chart.
-              </p>
-            ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="wins" stroke="#00C49F" strokeWidth={2} />
-                <Line type="monotone" dataKey="losses" stroke="#FF8042" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-screen-2xl space-y-6 p-6">
+        <PageHeader title="Dashboard" description="Loading your workspace overview…" />
+        <LoadingDisplay />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-screen-2xl space-y-6 p-6">
+        <PageHeader title="Dashboard" description="Workspace overview" />
+        <ErrorDisplay title="Failed to load dashboard" description={loadError} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-screen-2xl space-y-6 p-6">
+      {analyticsLoadError ? (
+        <div className="rounded-xl border border-yellow-300 bg-yellow-50 p-4 text-sm text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-100">
+          {analyticsLoadError}
+        </div>
+      ) : null}
+
+      <PageHeader
+        eyebrow="Overview"
+        title={dashboardConfig.title}
+        description={dashboardConfig.subtitle}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {!canToggleScope ? null : (
+              <div className="flex items-center rounded-xl border border-border bg-card p-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={scope === "me" ? "primary" : "ghost"}
+                  onClick={() => setScope("me")}
+                >
+                  Me
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={scope === "workspace" ? "primary" : "ghost"}
+                  onClick={() => setScope("workspace")}
+                >
+                  Workspace
+                </Button>
+              </div>
             )}
-          </CardContent>
-        </Card>
+            {!canEditLayouts ? null : (
+              <>
+                <PageLayoutEditor
+                  title="Summary cards"
+                  buttonLabel="Card configuration"
+                  description="Configure the four summary cards shown at the top of this page and Records."
+                >
+                  <SummaryCardsPanel />
+                </PageLayoutEditor>
+                <PageLayoutEditor
+                  title={`${terminology.dashboardLabel || "Dashboard"} layout`}
+                  description="Configure widgets and titles for this workspace. Changes apply to everyone in the workspace unless you save a personal dashboard."
+                >
+                  <DashboardLayoutPanel />
+                </PageLayoutEditor>
+              </>
+            )}
+            <Link to="/app/reports">
+              <Button variant="outline" size="sm">
+                <BarChart3 className="w-4 h-4" />
+                Reports
+              </Button>
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                void downloadWithAuth(
+                  "/export/opportunities.xlsx?archived=exclude",
+                  `${terminology.recordPlural}.xlsx`
+                ).catch((e) => alert(e instanceof Error ? e.message : "Export failed"))
+              }
+            >
+              <Download className="w-4 h-4" />
+              Export
+            </Button>
+            {canEdit ? (
+              <Link to="/app/opportunities/new">
+                <Button size="sm">
+                  <Plus className="w-4 h-4" />
+                  New {terminology.recordSingular}
+                </Button>
+              </Link>
+            ) : null}
+          </div>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {dashboardSummaryCards.map((card) => (
+          <StatCard
+            key={card.id}
+            label={card.label}
+            value={card.value}
+            description={card.description}
+            icon={card.icon}
+            iconClassName={card.iconClassName}
+            accentClassName={card.accentClassName}
+          />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {dashboardConfig.widgets.map(renderWidget)}
       </div>
     </div>
   );

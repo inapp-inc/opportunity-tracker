@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router";
 import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
 import { AlertCircle } from "lucide-react";
-import { apiFetch } from "../lib/api";
+import { apiFetch, clearActiveTenantId } from "../lib/api";
 import { setToken } from "../lib/auth";
 
 export function SignIn() {
@@ -29,6 +29,7 @@ export function SignIn() {
         method: "POST",
         body: JSON.stringify({ email, password, remember }),
       });
+      clearActiveTenantId();
       setToken(body.accessToken, remember);
       navigate("/app");
     } catch (err) {
@@ -44,7 +45,12 @@ export function SignIn() {
     <div className="w-full max-w-md">
       <div className="bg-card border border-border rounded-lg p-8 shadow-lg">
         <div className="mb-8 text-center">
-          <h1 className="mb-2">Presales Tracker</h1>
+          <img
+            src={`${import.meta.env.BASE_URL}inapp-logo.png`}
+            alt="InApp"
+            className="mx-auto mb-4 h-10 w-auto object-contain"
+          />
+          <h1 className="mb-2">Opportunity Tracker</h1>
           <p className="text-muted-foreground">Sign in to your account</p>
         </div>
 
@@ -98,13 +104,6 @@ export function SignIn() {
           </Button>
         </form>
 
-        <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-          <p className="text-sm text-muted-foreground text-center">
-            Default credentials (override via env on server):{" "}
-            <span className="text-foreground">demo@example.com</span> /{" "}
-            <span className="text-foreground">password</span>
-          </p>
-        </div>
       </div>
     </div>
   );
