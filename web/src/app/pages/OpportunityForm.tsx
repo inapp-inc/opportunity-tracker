@@ -6,11 +6,12 @@ import { Input } from "../components/ui/Input";
 import { Select } from "../components/ui/Select";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Modal } from "../components/ui/Modal";
-import { Link2, Save, X } from "lucide-react";
+import { Link2, Save, X, Plus, Trash2 } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { useAuthUser } from "../contexts/AuthUserContext";
 import type {
   ApiOpportunity,
+  OpportunityDeliverable,
   TenantFieldDefinition,
 } from "../lib/opportunity";
 import { lowerFirst, useTerminology } from "../lib/terminology";
@@ -40,36 +41,48 @@ interface FormData {
   prospect: string;
   description: string;
   ownerIds: string[];
-  deliverables: string;
-  dueDate: string;
-  status: string;
-  winLoss: string;
-  dealStage: string;
-  firstPresalesCall: string;
-  closedDate: string;
   prospectType: string;
   engagementType: string;
+  firstPresalesCall: string;
+}
+
+type DeliverableFormItem = {
+  id: string;
+  deliverableType: string;
+  dueDate: string;
+  startDate: string;
+  closedDate: string;
+  dealStage: string;
+  status: string;
+  winOrLoss: string;
   value: string;
   currency: string;
   notes: string;
+};
+
+function createBlankDeliverable(): DeliverableFormItem {
+  return {
+    id: crypto.randomUUID(),
+    deliverableType: "",
+    dueDate: "",
+    startDate: "",
+    closedDate: "",
+    dealStage: "Discovery",
+    status: "Not Started",
+    winOrLoss: "Open",
+    value: "",
+    currency: "USD",
+    notes: "",
+  };
 }
 
 const initialFormData: FormData = {
   prospect: "",
   description: "",
   ownerIds: [],
-  deliverables: "",
-  dueDate: "",
-  status: "Not Started",
-  winLoss: "Open",
-  dealStage: "Discovery",
-  firstPresalesCall: "",
-  closedDate: "",
   prospectType: "",
   engagementType: "",
-  value: "",
-  currency: "USD",
-  notes: "",
+  firstPresalesCall: "",
 };
 
 const DEFAULT_PT = [
@@ -114,12 +127,18 @@ export function OpportunityForm() {
   const { lookups: catalogLookups, reload: reloadCatalog } = useCatalogLookups();
 
   const [formData, setFormData] = useState<FormData>(initialFormData);
+  const [deliverableItems, setDeliverableItems] = useState<DeliverableFormItem[]>([
+    createBlankDeliverable(),
+  ]);
   const [customFields, setCustomFields] = useState<Record<string, CustomFieldValue>>({});
   const [version, setVersion] = useState<number | null>(null);
   const [isDraft, setIsDraft] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>(
     {}
   );
+  const [deliverableErrors, setDeliverableErrors] = useState<
+    Record<number, Partial<Record<keyof DeliverableFormItem, string>>>
+  >({});
   const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -148,27 +167,51 @@ export function OpportunityForm() {
 
   const applyRecordToForm = useCallback(
     (o: ApiOpportunity) => {
-      const del =
-        Array.isArray(o.deliverables) && o.deliverables.length
-          ? o.deliverables.join(", ")
-          : "";
       setFormData({
         prospect: o.prospect,
         description: o.opportunityDescription,
         ownerIds: o.ownerIds || [],
-        deliverables: del,
-        dueDate: o.dueDate,
-        status: o.status,
-        winLoss: o.winOrLoss,
-        dealStage: o.dealStage || "Discovery",
-        firstPresalesCall: o.firstPresalesCall || "",
-        closedDate: o.closedDate || "",
         prospectType: o.prospectType,
         engagementType: o.engagementType,
-        value: String(o.value ?? ""),
-        currency: o.currency || "USD",
-        notes: o.notes || "",
+        firstPresalesCall: o.firstPresalesCall || "",
       });
+      if (o.deliverableItems?.length) {
+        setDeliverableItems(
+          o.deliverableItems.map((d: OpportunityDeliverable) => ({
+            id: d.id,
+            deliverableType: d.deliverableType,
+            dueDate: d.dueDate,
+            startDate: d.startDate || "",
+            closedDate: d.closedDate || "",
+            dealStage: d.dealStage || "Discovery",
+            status: d.status,
+            winOrLoss: d.winOrLoss,
+            value: String(d.value ?? ""),
+            currency: d.currency || "USD",
+            notes: d.notes || "",
+          }))
+        );
+      } else {
+        const del =
+          Array.isArray(o.deliverables) && o.deliverables.length
+            ? o.deliverables.join(", ")
+            : "";
+        setDeliverableItems([
+          {
+            id: crypto.randomUUID(),
+            deliverableType: del,
+            dueDate: o.dueDate,
+            startDate: "",
+            closedDate: o.closedDate || "",
+            dealStage: o.dealStage || "Discovery",
+            status: o.status,
+            winOrLoss: o.winOrLoss,
+            value: String(o.value ?? ""),
+            currency: o.currency || "USD",
+            notes: o.notes || "",
+          },
+        ]);
+      }
       setIsDraft(Boolean(o.isDraft));
       setCustomFields(() => {
         const src = o.customFields || {};
@@ -232,15 +275,56 @@ export function OpportunityForm() {
     }
   };
 
-  const setFormField = (name: keyof FormData, value: string) => {
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    if (errors[name]) {
-      setErrors((prev) => ({ ...prev, [name]: undefined }));
+  const updateDeliverableItem = (
+    index: number,
+    field: keyof DeliverableFormItem,
+    value: string
+  ) => {
+    setDeliverableItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+    );
+    if (deliverableErrors[index]?.[field]) {
+      setDeliverableErrors((prev) => {
+        const next = { ...prev };
+        if (next[index]) {
+          const itemErrors = { ...next[index] };
+          delete itemErrors[field];
+          if (Object.keys(itemErrors).length === 0) {
+            delete next[index];
+          } else {
+            next[index] = itemErrors;
+          }
+        }
+        return next;
+      });
     }
+  };
+
+  const removeDeliverableItem = (index: number) => {
+    setDeliverableItems((prev) =>
+      prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)
+    );
+    setDeliverableErrors((prev) => {
+      const next: Record<number, Partial<Record<keyof DeliverableFormItem, string>>> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        const i = Number(key);
+        if (i < index) next[i] = value;
+        else if (i > index) next[i - 1] = value;
+      }
+      return next;
+    });
+  };
+
+  const addDeliverableItem = () => {
+    setDeliverableItems((prev) => [...prev, createBlankDeliverable()]);
   };
 
   const validate = (): boolean => {
     const newErrors: Partial<Record<keyof FormData, string>> = {};
+    const newDeliverableErrors: Record<
+      number,
+      Partial<Record<keyof DeliverableFormItem, string>>
+    > = {};
     const requiredFor = (key: string, fallback: boolean) =>
       fieldConfig(key)?.required ?? fallback;
 
@@ -258,13 +342,6 @@ export function OpportunityForm() {
     if (requiredFor("ownerIds", true) && !formData.ownerIds.length) {
       newErrors.ownerIds = "Select at least one owner";
     }
-    if (requiredFor("dealStage", true) && !formData.dealStage) {
-      newErrors.dealStage = "Deal stage is required";
-    }
-
-    if (requiredFor("dueDate", true) && !formData.dueDate) {
-      newErrors.dueDate = "Due date is required";
-    }
 
     if (requiredFor("prospectType", true) && !formData.prospectType) {
       newErrors.prospectType = "Prospect type is required";
@@ -274,15 +351,35 @@ export function OpportunityForm() {
       newErrors.engagementType = "Engagement type is required";
     }
 
-    if (formData.value && isNaN(Number(formData.value))) {
-      newErrors.value = "Value must be a number";
-    }
-    const deliverablesConfig = fieldConfig("deliverables");
-    if (deliverablesConfig?.required && !formData.deliverables.trim()) {
-      newErrors.deliverables = `${deliverablesConfig.label} is required`;
+    if (deliverableItems.length === 0) {
+      newDeliverableErrors[0] = {
+        deliverableType: "At least one deliverable is required",
+      };
     }
 
+    deliverableItems.forEach((item, index) => {
+      if (requiredFor("dueDate", true) && !item.dueDate) {
+        newDeliverableErrors[index] = {
+          ...newDeliverableErrors[index],
+          dueDate: "Due date is required",
+        };
+      }
+      if (!isDraft && !item.deliverableType.trim()) {
+        newDeliverableErrors[index] = {
+          ...newDeliverableErrors[index],
+          deliverableType: "Deliverable type is required",
+        };
+      }
+      if (item.value && isNaN(Number(item.value))) {
+        newDeliverableErrors[index] = {
+          ...newDeliverableErrors[index],
+          value: "Value must be a number",
+        };
+      }
+    });
+
     setErrors(newErrors);
+    setDeliverableErrors(newDeliverableErrors);
     const nextCustomErrors: Record<string, string> = {};
     const fieldsToValidate = techStackField
       ? [
@@ -305,7 +402,11 @@ export function OpportunityForm() {
       }
     }
     setCustomErrors(nextCustomErrors);
-    return Object.keys(newErrors).length === 0 && Object.keys(nextCustomErrors).length === 0;
+    return (
+      Object.keys(newErrors).length === 0 &&
+      Object.keys(nextCustomErrors).length === 0 &&
+      Object.keys(newDeliverableErrors).length === 0
+    );
   };
 
   const handleCustomFieldChange = (
@@ -336,7 +437,6 @@ export function OpportunityForm() {
   };
 
   const buildPayload = () => {
-    const valueNum = formData.value === "" ? 0 : Number(formData.value);
     const sanitizeCustomFields = () => {
       const active = schemaFields.filter((f) => f.status !== "INACTIVE");
       const allowed = new Set(
@@ -354,19 +454,23 @@ export function OpportunityForm() {
       prospect: formData.prospect,
       opportunityDescription: formData.description,
       ownerIds: formData.ownerIds,
-      deliverables: formData.deliverables,
-      dueDate: formData.dueDate,
-      status: formData.status,
-      dealStage: formData.dealStage,
+      deliverableItems: deliverableItems.map((item) => ({
+        id: item.id,
+        deliverableType: item.deliverableType,
+        dueDate: item.dueDate,
+        startDate: item.startDate || null,
+        closedDate: item.closedDate || null,
+        dealStage: item.dealStage,
+        status: item.status,
+        winOrLoss: item.winOrLoss,
+        value: Number(item.value) || 0,
+        currency: item.currency,
+        notes: item.notes,
+      })),
       customFields: sanitizeCustomFields(),
-      notes: formData.notes,
-      winOrLoss: formData.winLoss,
-      firstPresalesCall: formData.firstPresalesCall || null,
-      closedDate: formData.closedDate || null,
       prospectType: formData.prospectType,
       engagementType: formData.engagementType,
-      value: valueNum,
-      currency: formData.currency,
+      firstPresalesCall: formData.firstPresalesCall || null,
       isDraft,
     };
   };
@@ -375,6 +479,18 @@ export function OpportunityForm() {
     if (key === "opportunityDescription") return formData.description;
     if (key === "ownerIds") return undefined;
     if (key in formData) return String(formData[key as keyof FormData] ?? "");
+    if (deliverableItems.length > 0) {
+      const first = deliverableItems[0];
+      if (key === "dueDate") return first.dueDate;
+      if (key === "status") return first.status;
+      if (key === "winOrLoss") return first.winOrLoss;
+      if (key === "dealStage") return first.dealStage;
+      if (key === "closedDate") return first.closedDate;
+      if (key === "value") return first.value;
+      if (key === "currency") return first.currency;
+      if (key === "notes") return first.notes;
+      if (key === "deliverables") return first.deliverableType;
+    }
     return undefined;
   };
 
@@ -423,18 +539,40 @@ export function OpportunityForm() {
       addIfEmpty("prospect", "Prospect", formData.prospect);
       addIfEmpty("ownerIds", "Owners", formData.ownerIds);
       addIfEmpty("opportunityDescription", "Description", formData.description);
-      addIfEmpty("deliverables", "Deliverables", formData.deliverables);
-      addIfEmpty("dueDate", "Due Date", formData.dueDate);
-      addIfEmpty("status", "Status", formData.status);
       addIfEmpty("prospectType", "Prospect Type", formData.prospectType);
       addIfEmpty("engagementType", "Type of Engagement", formData.engagementType);
-      addIfEmpty("dealStage", "Deal stage", formData.dealStage);
-      addIfEmpty("winOrLoss", "Win or Loss", formData.winLoss);
       addIfEmpty("firstPresalesCall", "First Presales Call", formData.firstPresalesCall);
-      addIfEmpty("closedDate", "Closed Date", formData.closedDate);
-      addIfEmpty("notes", "Notes", formData.notes);
-      addIfEmpty("value", "Value", formData.value);
-      addIfEmpty("currency", "Currency", formData.currency);
+
+      deliverableItems.forEach((item, index) => {
+        const prefix = deliverableItems.length > 1 ? `Deliverable ${index + 1} — ` : "";
+        if (fieldVisible("deliverables") && !item.deliverableType.trim()) {
+          empties.push(`${prefix}Deliverable Type`);
+        }
+        if (fieldVisible("dueDate") && !item.dueDate) {
+          empties.push(`${prefix}Due Date`);
+        }
+        if (fieldVisible("status") && !item.status) {
+          empties.push(`${prefix}Status`);
+        }
+        if (fieldVisible("dealStage") && !item.dealStage) {
+          empties.push(`${prefix}Deal stage`);
+        }
+        if (fieldVisible("winOrLoss") && !item.winOrLoss) {
+          empties.push(`${prefix}Win or Loss`);
+        }
+        if (fieldVisible("closedDate") && !item.closedDate) {
+          empties.push(`${prefix}Closed Date`);
+        }
+        if (fieldVisible("notes") && !item.notes.trim()) {
+          empties.push(`${prefix}Notes`);
+        }
+        if (fieldVisible("value") && !item.value) {
+          empties.push(`${prefix}Value`);
+        }
+        if (fieldVisible("currency") && !item.currency) {
+          empties.push(`${prefix}Currency`);
+        }
+      });
 
       if (techStackField && isEmpty(customFields.techStack)) empties.push(techStackField.label);
       for (const field of customSchemaFields) {
@@ -580,89 +718,6 @@ export function OpportunityForm() {
   const fieldVisible = (key: string) => anyFieldConfig(key)?.status !== "INACTIVE";
   const fieldRequired = (key: string, fallback: boolean) =>
     fieldConfig(key)?.required ?? fallback;
-
-  const renderDeliverablesField = () => {
-    const field = fieldConfig("deliverables");
-    const label = field?.label || "Deliverables";
-    const options = deliverablesSelectOptions
-      .map((option) => option.value)
-      .filter(Boolean);
-    const selectedValues = formData.deliverables
-      .split(/[;,|]/)
-      .map((value) => value.trim())
-      .filter(Boolean);
-
-    if (field?.fieldType === "select" || field?.fieldType === "lookup_select") {
-      return (
-        <Select
-          label={label}
-          name="deliverables"
-          value={formData.deliverables}
-          onChange={handleChange}
-          required={field.required}
-          error={errors.deliverables}
-          options={deliverablesSelectOptions}
-        />
-      );
-    }
-
-    if (field?.fieldType === "multi_select" || field?.fieldType === "lookup_multi_select") {
-      return (
-        <div className="space-y-2">
-          <p className="text-sm">
-            {label}
-            {field.required ? <span className="text-destructive ml-1">*</span> : null}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {options.map((option) => (
-              <label
-                key={option}
-                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedValues.includes(option)}
-                  onChange={(e) => {
-                    const next = e.target.checked
-                      ? [...selectedValues, option]
-                      : selectedValues.filter((value) => value !== option);
-                    setFormField("deliverables", next.join(", "));
-                  }}
-                />
-                {option}
-              </label>
-            ))}
-          </div>
-          {errors.deliverables ? (
-            <p className="text-sm text-destructive mt-1">{errors.deliverables}</p>
-          ) : null}
-        </div>
-      );
-    }
-
-    return (
-      <div>
-        <label htmlFor="deliverables" className="block text-sm mb-1">
-          {label}
-          {field?.required ? <span className="text-destructive ml-1">*</span> : null}
-        </label>
-        <textarea
-          id="deliverables"
-          name="deliverables"
-          value={formData.deliverables}
-          onChange={handleChange}
-          rows={2}
-          className={`w-full px-3 py-2 bg-input-background rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-ring ${
-            errors.deliverables ? "border-destructive" : "border-border"
-          }`}
-          placeholder="e.g., Proposal, Demo, Technical Architecture"
-        />
-        {errors.deliverables ? (
-          <p className="text-sm text-destructive mt-1">{errors.deliverables}</p>
-        ) : null}
-      </div>
-    );
-  };
 
   const renderCustomField = (field: TenantFieldDefinition) => {
     const value = customFields[field.key];
@@ -944,10 +999,6 @@ export function OpportunityForm() {
               )}
             </div>
 
-            {fieldVisible("deliverables") ? (
-              renderDeliverablesField()
-            ) : null}
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Select
                 label={fieldLabel("prospectType", "Prospect Type")}
@@ -972,106 +1023,177 @@ export function OpportunityForm() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Delivery Tracking</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input
-                label={fieldLabel("dueDate", "Due Date")}
-                name="dueDate"
-                type="date"
-                value={formData.dueDate}
-                onChange={handleChange}
-                error={errors.dueDate}
-                required={fieldRequired("dueDate", true)}
-              />
-
-              {fieldVisible("firstPresalesCall") ? (
-                <Input
-                  label={fieldLabel("firstPresalesCall", "First Presales Call")}
-                  name="firstPresalesCall"
-                  type="date"
-                  value={formData.firstPresalesCall}
-                  onChange={handleChange}
+        {deliverableItems.map((item, index) => (
+          <Card key={item.id}>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Deliverable {index + 1}</CardTitle>
+                {deliverableItems.length > 1 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeDeliverableItem(index)}
+                    aria-label={`Remove deliverable ${index + 1}`}
+                  >
+                    <Trash2 className="w-4 h-4 text-destructive" />
+                  </Button>
+                ) : null}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {fieldVisible("deliverables") ? (
+                <Select
+                  label="Deliverable Type"
+                  value={item.deliverableType}
+                  onChange={(e) =>
+                    updateDeliverableItem(index, "deliverableType", e.target.value)
+                  }
+                  error={deliverableErrors[index]?.deliverableType}
+                  required={fieldRequired("deliverables", !isDraft)}
+                  options={deliverablesSelectOptions}
                 />
               ) : null}
 
-              {fieldVisible("closedDate") ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Input
-                  label={fieldLabel("closedDate", "Closed Date")}
-                  name="closedDate"
+                  label={fieldLabel("dueDate", "Due Date")}
                   type="date"
-                  value={formData.closedDate}
-                  onChange={handleChange}
-                  helperText="Leave empty if not closed"
+                  value={item.dueDate}
+                  onChange={(e) =>
+                    updateDeliverableItem(index, "dueDate", e.target.value)
+                  }
+                  error={deliverableErrors[index]?.dueDate}
+                  required={fieldRequired("dueDate", true)}
                 />
+
+                <Input
+                  label="Build Start Date"
+                  type="date"
+                  value={item.startDate}
+                  onChange={(e) =>
+                    updateDeliverableItem(index, "startDate", e.target.value)
+                  }
+                />
+
+                {fieldVisible("closedDate") ? (
+                  <Input
+                    label={fieldLabel("closedDate", "Closed Date")}
+                    type="date"
+                    value={item.closedDate}
+                    onChange={(e) =>
+                      updateDeliverableItem(index, "closedDate", e.target.value)
+                    }
+                    helperText="Leave empty if not closed"
+                  />
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Select
+                  label={fieldLabel("dealStage", "Deal stage")}
+                  value={item.dealStage}
+                  onChange={(e) =>
+                    updateDeliverableItem(index, "dealStage", e.target.value)
+                  }
+                  required={fieldRequired("dealStage", true)}
+                  options={dealStageSelectOptions}
+                />
+
+                <Select
+                  label={fieldLabel("status", "Status")}
+                  value={item.status}
+                  onChange={(e) =>
+                    updateDeliverableItem(index, "status", e.target.value)
+                  }
+                  required={fieldRequired("status", true)}
+                  options={statusSelectOptions}
+                />
+
+                <Select
+                  label={fieldLabel("winOrLoss", "Win or Loss")}
+                  value={item.winOrLoss}
+                  onChange={(e) =>
+                    updateDeliverableItem(index, "winOrLoss", e.target.value)
+                  }
+                  required={fieldRequired("winOrLoss", true)}
+                  options={winLossSelectOptions}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {fieldVisible("value") ? (
+                  <Input
+                    label={fieldLabel("value", "SOW Value")}
+                    type="number"
+                    value={item.value}
+                    onChange={(e) =>
+                      updateDeliverableItem(index, "value", e.target.value)
+                    }
+                    error={deliverableErrors[index]?.value}
+                    placeholder="0"
+                  />
+                ) : null}
+
+                {fieldVisible("currency") ? (
+                  <Select
+                    label={fieldLabel("currency", "Currency")}
+                    value={item.currency}
+                    onChange={(e) =>
+                      updateDeliverableItem(index, "currency", e.target.value)
+                    }
+                    required={fieldRequired("currency", true)}
+                    options={currencySelectOptions}
+                  />
+                ) : null}
+              </div>
+
+              {fieldVisible("notes") ? (
+                <div>
+                  <label
+                    htmlFor={`deliverable-notes-${item.id}`}
+                    className="block text-sm mb-1"
+                  >
+                    {fieldLabel("notes", "Notes")}
+                  </label>
+                  <textarea
+                    id={`deliverable-notes-${item.id}`}
+                    value={item.notes}
+                    onChange={(e) =>
+                      updateDeliverableItem(index, "notes", e.target.value)
+                    }
+                    rows={4}
+                    className="w-full px-3 py-2 bg-input-background rounded-lg border border-border transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
+                    placeholder="Additional notes, stakeholder information, key requirements..."
+                  />
+                </div>
               ) : null}
-            </div>
+            </CardContent>
+          </Card>
+        ))}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Select
-                label={fieldLabel("dealStage", "Deal stage")}
-                name="dealStage"
-                value={formData.dealStage}
-                onChange={handleChange}
-                error={errors.dealStage}
-                required={fieldRequired("dealStage", true)}
-                options={dealStageSelectOptions}
-              />
+        <Button type="button" variant="outline" onClick={addDeliverableItem}>
+          <Plus className="w-4 h-4" />
+          Add Deliverable
+        </Button>
 
-              <Select
-                label={fieldLabel("status", "Status")}
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-                required={fieldRequired("status", true)}
-                options={statusSelectOptions}
-              />
+        {fieldVisible("firstPresalesCall") ? (
+          <Input
+            label={fieldLabel("firstPresalesCall", "First Presales Call")}
+            name="firstPresalesCall"
+            type="date"
+            value={formData.firstPresalesCall}
+            onChange={handleChange}
+          />
+        ) : null}
 
-              <Select
-                label={fieldLabel("winOrLoss", "Win or Loss")}
-                name="winLoss"
-                value={formData.winLoss}
-                onChange={handleChange}
-                required={fieldRequired("winOrLoss", true)}
-                options={winLossSelectOptions}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
+        {customSchemaFields.length > 0 ||
+        (techStackField && fieldVisible("techStack")) ? (
         <Card>
           <CardHeader>
             <CardTitle>Commercial Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {fieldVisible("value") ? (
-                <Input
-                  label={fieldLabel("value", "Value")}
-                  name="value"
-                  type="number"
-                  value={formData.value}
-                  onChange={handleChange}
-                  error={errors.value}
-                  placeholder="0"
-                />
-              ) : null}
-
-              {fieldVisible("currency") ? (
-                <Select
-                  label={fieldLabel("currency", "Currency")}
-                  name="currency"
-                  value={formData.currency}
-                  onChange={handleChange}
-                  required={fieldRequired("currency", true)}
-                  options={currencySelectOptions}
-                />
-              ) : null}
-            </div>
-
             {customSchemaFields.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {customSchemaFields.map((field) => renderCustomField(field))}
@@ -1081,25 +1203,9 @@ export function OpportunityForm() {
             {techStackField && fieldVisible("techStack")
               ? renderCustomField(techStackField)
               : null}
-
-            {fieldVisible("notes") ? (
-              <div>
-                <label htmlFor="notes" className="block text-sm mb-1">
-                  {fieldLabel("notes", "Notes")}
-                </label>
-                <textarea
-                  id="notes"
-                  name="notes"
-                  value={formData.notes}
-                  onChange={handleChange}
-                  rows={4}
-                  className="w-full px-3 py-2 bg-input-background rounded-lg border border-border transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="Additional notes, stakeholder information, key requirements..."
-                />
-              </div>
-            ) : null}
           </CardContent>
         </Card>
+        ) : null}
           </div>
           <aside className="space-y-6">
             <Card className="sticky top-6">

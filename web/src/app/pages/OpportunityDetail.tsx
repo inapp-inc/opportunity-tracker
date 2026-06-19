@@ -635,12 +635,6 @@ export function OpportunityDetail() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground mb-1">
-                    Deliverables
-                  </p>
-                  <p>{deliverablesText}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">
                     Prospect Type
                   </p>
                   <p>{opp.prospectType}</p>
@@ -650,12 +644,6 @@ export function OpportunityDetail() {
                     Engagement Type
                   </p>
                   <p>{opp.engagementType}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">
-                    First Presales Call
-                  </p>
-                  <p>{opp.firstPresalesCall || "—"}</p>
                 </div>
                 {schemaFields.filter((field) => field.source !== "system").length > 0 ? (
                   <div className="pt-2 border-t border-border">
@@ -687,6 +675,50 @@ export function OpportunityDetail() {
                 </p>
               </CardContent>
             </Card>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            <h3 className="text-lg font-semibold">Deliverables</h3>
+            {opp.deliverableItems && opp.deliverableItems.length > 0 ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {opp.deliverableItems.map((item, index) => (
+                  <Card key={item.id}>
+                    <CardHeader>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <CardTitle className="text-base">
+                          {item.deliverableType || `Deliverable ${index + 1}`}
+                        </CardTitle>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {getStatusBadge(item.status)}
+                          {getWinLossBadge(item.winOrLoss)}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <Metric label="Due Date" value={item.dueDate || "—"} />
+                      {item.startDate ? (
+                        <Metric label="Start Date" value={item.startDate} />
+                      ) : null}
+                      {item.closedDate ? (
+                        <Metric label="Closed Date" value={item.closedDate} />
+                      ) : null}
+                      <Metric label="Deal Stage" value={item.dealStage || "Discovery"} />
+                      <Metric
+                        label="Value"
+                        value={formatMoney(Number(item.value || 0), item.currency)}
+                      />
+                      {item.notes ? (
+                        <Metric label="Notes" value={item.notes} multiline />
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {deliverablesText || "No deliverables on this record."}
+              </p>
+            )}
           </div>
         </TabsContent>
 

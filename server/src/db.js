@@ -447,4 +447,73 @@ export function migrate() {
     '2026-05-25-rbac-memberships',
     now
   );
+
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS opportunity_deliverables (
+    id TEXT PRIMARY KEY,
+    opportunity_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    deliverable_type TEXT NOT NULL DEFAULT '',
+    due_date TEXT NOT NULL DEFAULT '',
+    start_date TEXT,
+    closed_date TEXT,
+    deal_stage TEXT NOT NULL DEFAULT 'Discovery',
+    status TEXT NOT NULL DEFAULT 'Not Started',
+    win_or_loss TEXT NOT NULL DEFAULT 'Open',
+    value REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    notes TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_opp_deliverables_opp ON opportunity_deliverables(opportunity_id);
+  CREATE INDEX IF NOT EXISTS idx_opp_deliverables_tenant ON opportunity_deliverables(tenant_id);
+  `);
+
+  const deliverablesMigration = db
+    .prepare(`SELECT 1 FROM schema_migrations WHERE id = ?`)
+    .get('2026-06-18-deliverables');
+  if (!deliverablesMigration) {
+    const opportunities = db.prepare(`SELECT * FROM opportunities`).all();
+    const insertDeliverable = db.prepare(
+      `INSERT INTO opportunity_deliverables (
+        id, opportunity_id, tenant_id, deliverable_type, due_date, start_date, closed_date,
+        deal_stage, status, win_or_loss, value, currency, notes, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const row of opportunities) {
+      const types = String(row.deliverables || '')
+        .split(/[,;|]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const itemsToInsert = types.length ? types : [''];
+      for (let i = 0; i < itemsToInsert.length; i += 1) {
+        const isFirst = i === 0;
+        insertDeliverable.run(
+          randomUUID(),
+          row.id,
+          row.tenant_id || defaultTenantId,
+          itemsToInsert[i],
+          isFirst ? row.due_date || '' : '',
+          isFirst ? row.first_presales_call || null : null,
+          isFirst ? row.closed_date || null : null,
+          isFirst ? row.deal_stage || 'Discovery' : 'Discovery',
+          isFirst ? row.status || 'Not Started' : 'Not Started',
+          isFirst ? row.win_or_loss || 'Open' : 'Open',
+          isFirst ? Number(row.value || 0) : 0,
+          isFirst ? row.currency || 'USD' : 'USD',
+          isFirst ? row.notes || '' : '',
+          i,
+          row.created_at || now,
+          row.updated_at || now
+        );
+      }
+    }
+    db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)`).run(
+      '2026-06-18-deliverables',
+      now
+    );
+  }
 }

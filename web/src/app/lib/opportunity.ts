@@ -21,6 +21,22 @@ export type OpportunityActivity = {
   createdAt: string;
 };
 
+export type OpportunityDeliverable = {
+  id: string;
+  opportunityId: string;
+  deliverableType: string;
+  dueDate: string;
+  startDate?: string | null;
+  closedDate?: string | null;
+  dealStage: string;
+  status: string;
+  winOrLoss: string;
+  value: number;
+  currency: string;
+  notes: string;
+  sortOrder: number;
+};
+
 export type TenantFieldDefinition = {
   id: string;
   key: string;
@@ -58,6 +74,7 @@ export type ApiOpportunity = {
   opportunityDescription: string;
   ownerIds: string[];
   owners?: OpportunityOwner[];
+  deliverableItems?: OpportunityDeliverable[];
   deliverables: string[];
   dueDate: string;
   status: string;

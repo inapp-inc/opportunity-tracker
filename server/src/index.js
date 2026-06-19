@@ -782,7 +782,8 @@ app.get('/opportunities/:id', requireTenantPermission(PERMISSIONS.RECORDS_READ),
     .prepare('SELECT * FROM opportunities WHERE id = ? AND tenant_id = ?')
     .get(req.params.id, tenantId);
   if (!row) return res.status(404).json({ message: 'Not found' });
-  res.json(mapOpportunityRow(row));
+  const deliverableItems = fetchDeliverableItems(req.params.id, tenantId);
+  res.json(mapOpportunityRow(row, null, deliverableItems));
 });
 
 app.post('/opportunities', requireTenantPermission(PERMISSIONS.RECORDS_CREATE), (req, res) => {
@@ -790,7 +791,14 @@ app.post('/opportunities', requireTenantPermission(PERMISSIONS.RECORDS_CREATE), 
   const body = req.body || {};
   try {
     const saved = createOpportunityRecord(body, tenantId, req);
-    res.status(201).json(mapOpportunityRow(saved));
+    if (Array.isArray(body.deliverableItems) && body.deliverableItems.length > 0) {
+      syncDeliverableItems(saved.id, tenantId, body.deliverableItems);
+    }
+    const refreshed = db
+      .prepare('SELECT * FROM opportunities WHERE id = ? AND tenant_id = ?')
+      .get(saved.id, tenantId);
+    const deliverableItems = fetchDeliverableItems(saved.id, tenantId);
+    res.status(201).json(mapOpportunityRow(refreshed, null, deliverableItems));
   } catch (e) {
     return res.status(400).json({ message: e instanceof Error ? e.message : 'invalid record' });
   }
@@ -846,6 +854,9 @@ app.patch('/opportunities/:id', requireTenantPermission(PERMISSIONS.RECORDS_UPDA
       return res.status(400).json({ message: e instanceof Error ? e.message : 'invalid customFields' });
     }
   }
+  if (Array.isArray(body.deliverableItems) && body.deliverableItems.length > 0) {
+    applyFirstDeliverableToOpportunityRow(next, body.deliverableItems);
+  }
   // If client doesn't send isDraft, keep current flag.
   if (next.is_draft === undefined || next.is_draft === null) {
     next.is_draft = existing.is_draft || 0;
@@ -898,11 +909,15 @@ app.patch('/opportunities/:id', requireTenantPermission(PERMISSIONS.RECORDS_UPDA
     return res.status(409).json({ message: 'Version conflict' });
   }
   syncRecordOwners(id, tenantId, JSON.parse(next.owner_json || '[]'));
+  if (Array.isArray(body.deliverableItems) && body.deliverableItems.length > 0) {
+    syncDeliverableItems(id, tenantId, body.deliverableItems);
+  }
   const saved = db
     .prepare('SELECT * FROM opportunities WHERE id = ? AND tenant_id = ?')
     .get(id, tenantId);
   recordOpportunityFieldChanges(existing, saved, req);
-  res.json(mapOpportunityRow(saved));
+  const deliverableItems = fetchDeliverableItems(id, tenantId);
+  res.json(mapOpportunityRow(saved, null, deliverableItems));
 });
 
 app.delete('/opportunities/:id', requireTenantPermission(PERMISSIONS.RECORDS_DELETE), (req, res) => {
@@ -2487,12 +2502,154 @@ function formatDeliverables(d) {
   return String(d);
 }
 
-function mapOpportunityRow(r, usersMap) {
+function mapDeliverableRow(r) {
+  return {
+    id: r.id,
+    opportunityId: r.opportunity_id,
+    deliverableType: r.deliverable_type,
+    dueDate: r.due_date,
+    startDate: r.start_date,
+    closedDate: r.closed_date,
+    dealStage: r.deal_stage,
+    status: r.status,
+    winOrLoss: r.win_or_loss,
+    value: r.value,
+    currency: r.currency,
+    notes: r.notes,
+    sortOrder: r.sort_order,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+function fetchDeliverableItems(opportunityId, tenantId) {
+  const rows = db
+    .prepare(
+      `SELECT * FROM opportunity_deliverables
+       WHERE opportunity_id = ? AND tenant_id = ?
+       ORDER BY sort_order, created_at`
+    )
+    .all(opportunityId, tenantId);
+  return rows.map(mapDeliverableRow);
+}
+
+function deliverablesJoinedText(items) {
+  return items
+    .map((d) => String(d.deliverableType || '').trim())
+    .filter(Boolean)
+    .join(', ');
+}
+
+function applyFirstDeliverableToOpportunityRow(row, items) {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const first = items[0];
+  row.deliverables = deliverablesJoinedText(items);
+  row.due_date = String(first.dueDate || '');
+  row.closed_date = first.closedDate || null;
+  row.deal_stage = String(first.dealStage || 'Discovery');
+  row.status = String(first.status || 'Not Started');
+  row.win_or_loss = String(first.winOrLoss || 'Open');
+  row.value = Number(first.value || 0);
+  row.currency = String(first.currency || 'USD');
+  row.notes = String(first.notes || '');
+}
+
+function enrichBodyFromDeliverableItems(body) {
+  if (!Array.isArray(body.deliverableItems) || body.deliverableItems.length === 0) {
+    return body;
+  }
+  const first = body.deliverableItems[0];
+  return {
+    ...body,
+    deliverables:
+      body.deliverables !== undefined
+        ? body.deliverables
+        : deliverablesJoinedText(body.deliverableItems),
+    dueDate: body.dueDate !== undefined ? body.dueDate : first.dueDate,
+    status: body.status !== undefined ? body.status : first.status,
+    dealStage: body.dealStage !== undefined ? body.dealStage : first.dealStage,
+    winOrLoss: body.winOrLoss !== undefined ? body.winOrLoss : first.winOrLoss,
+    closedDate: body.closedDate !== undefined ? body.closedDate : first.closedDate,
+    value: body.value !== undefined ? body.value : first.value,
+    currency: body.currency !== undefined ? body.currency : first.currency,
+    notes: body.notes !== undefined ? body.notes : first.notes,
+  };
+}
+
+function syncDeliverableItems(opportunityId, tenantId, items) {
+  db.prepare(
+    `DELETE FROM opportunity_deliverables WHERE opportunity_id = ? AND tenant_id = ?`
+  ).run(opportunityId, tenantId);
+
+  const now = nowIso();
+  const insert = db.prepare(
+    `INSERT INTO opportunity_deliverables (
+      id, opportunity_id, tenant_id, deliverable_type, due_date, start_date, closed_date,
+      deal_stage, status, win_or_loss, value, currency, notes, sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    insert.run(
+      item.id || randomUUID(),
+      opportunityId,
+      tenantId,
+      String(item.deliverableType || ''),
+      String(item.dueDate || ''),
+      item.startDate || null,
+      item.closedDate || null,
+      String(item.dealStage || 'Discovery'),
+      String(item.status || 'Not Started'),
+      String(item.winOrLoss || 'Open'),
+      Number(item.value || 0),
+      String(item.currency || 'USD'),
+      String(item.notes || ''),
+      i,
+      now,
+      now
+    );
+  }
+
+  if (items.length > 0) {
+    const first = items[0];
+    const deliverables = deliverablesJoinedText(items);
+    db.prepare(
+      `UPDATE opportunities SET
+        due_date = ?,
+        closed_date = ?,
+        deal_stage = ?,
+        status = ?,
+        win_or_loss = ?,
+        value = ?,
+        currency = ?,
+        notes = ?,
+        deliverables = ?
+      WHERE id = ? AND tenant_id = ?`
+    ).run(
+      String(first.dueDate || ''),
+      first.closedDate || null,
+      String(first.dealStage || 'Discovery'),
+      String(first.status || 'Not Started'),
+      String(first.winOrLoss || 'Open'),
+      Number(first.value || 0),
+      String(first.currency || 'USD'),
+      String(first.notes || ''),
+      deliverables,
+      opportunityId,
+      tenantId
+    );
+  }
+}
+
+function mapOpportunityRow(r, usersMap, deliverableItems = null) {
   const { ownerIds, owners } = resolveOwnersFromJson(r.owner_json, r.tenant_id, usersMap);
-  const deliverables = String(r.deliverables || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const deliverables = deliverableItems
+    ? deliverableItems.map((d) => d.deliverableType).filter(Boolean)
+    : String(r.deliverables || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
   let customFields = {};
   try {
     customFields = JSON.parse(r.custom_data_json || '{}');
@@ -2507,6 +2664,7 @@ function mapOpportunityRow(r, usersMap) {
     opportunityDescription: r.opportunity_description,
     ownerIds,
     owners,
+    deliverableItems: deliverableItems || [],
     deliverables: deliverables.length ? deliverables : [String(r.deliverables || '')].filter(Boolean),
     dueDate: r.due_date,
     status: r.status,
@@ -2542,40 +2700,43 @@ function validateOpportunityRowForPublish(row, tenantId = DEFAULT_TENANT_ID) {
 }
 
 function createOpportunityRecord(body, tenantId = DEFAULT_TENANT_ID, req) {
-  const isDraft = Boolean(body.isDraft);
+  const enrichedBody = enrichBodyFromDeliverableItems(body);
+  const isDraft = Boolean(enrichedBody.isDraft);
   if (!isDraft) {
-    const err = validateOpportunityCreate(body, tenantId);
+    const err = validateOpportunityCreate(enrichedBody, tenantId);
     if (err) throw new Error(err);
   }
 
   let customFields = {};
   try {
-    customFields = normalizeCustomFields(body.customFields, tenantId);
+    customFields = normalizeCustomFields(enrichedBody.customFields, tenantId);
   } catch (e) {
     throw new Error(e instanceof Error ? e.message : 'invalid customFields');
   }
 
   const id = randomUUID();
   const now = nowIso();
-  const ownerJson = JSON.stringify(isDraft ? (body.ownerIds || []) : normalizeOwnerIds(body.ownerIds, tenantId));
+  const ownerJson = JSON.stringify(
+    isDraft ? enrichedBody.ownerIds || [] : normalizeOwnerIds(enrichedBody.ownerIds, tenantId)
+  );
   const row = {
     id,
     tenant_id: tenantId,
-    prospect: String(body.prospect || ''),
-    opportunity_description: String(body.opportunityDescription || ''),
+    prospect: String(enrichedBody.prospect || ''),
+    opportunity_description: String(enrichedBody.opportunityDescription || ''),
     owner_json: ownerJson,
-    deliverables: formatDeliverables(body.deliverables),
-    due_date: String(body.dueDate || ''),
-    status: String(body.status || 'Not Started'),
-    notes: String(body.notes || ''),
-    win_or_loss: String(body.winOrLoss || 'Open'),
-    first_presales_call: body.firstPresalesCall || null,
-    closed_date: body.closedDate || null,
-    prospect_type: String(body.prospectType || ''),
-    engagement_type: String(body.engagementType || ''),
-    value: Number(body.value || 0),
-    currency: String(body.currency || 'USD'),
-    deal_stage: String(body.dealStage || defaultDealStage(tenantId)),
+    deliverables: formatDeliverables(enrichedBody.deliverables),
+    due_date: String(enrichedBody.dueDate || ''),
+    status: String(enrichedBody.status || 'Not Started'),
+    notes: String(enrichedBody.notes || ''),
+    win_or_loss: String(enrichedBody.winOrLoss || 'Open'),
+    first_presales_call: enrichedBody.firstPresalesCall || null,
+    closed_date: enrichedBody.closedDate || null,
+    prospect_type: String(enrichedBody.prospectType || ''),
+    engagement_type: String(enrichedBody.engagementType || ''),
+    value: Number(enrichedBody.value || 0),
+    currency: String(enrichedBody.currency || 'USD'),
+    deal_stage: String(enrichedBody.dealStage || defaultDealStage(tenantId)),
     custom_data_json: JSON.stringify(customFields),
     is_draft: isDraft ? 1 : 0,
     version: 1,
