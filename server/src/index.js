@@ -2510,11 +2510,6 @@ function mapDeliverableRow(r) {
     dueDate: r.due_date,
     startDate: r.start_date,
     closedDate: r.closed_date,
-    dealStage: r.deal_stage,
-    status: r.status,
-    winOrLoss: r.win_or_loss,
-    value: r.value,
-    currency: r.currency,
     notes: r.notes,
     sortOrder: r.sort_order,
     createdAt: r.created_at,
@@ -2546,12 +2541,6 @@ function applyFirstDeliverableToOpportunityRow(row, items) {
   row.deliverables = deliverablesJoinedText(items);
   row.due_date = String(first.dueDate || '');
   row.closed_date = first.closedDate || null;
-  row.deal_stage = String(first.dealStage || 'Discovery');
-  row.status = String(first.status || 'Not Started');
-  row.win_or_loss = String(first.winOrLoss || 'Open');
-  row.value = Number(first.value || 0);
-  row.currency = String(first.currency || 'USD');
-  row.notes = String(first.notes || '');
 }
 
 function enrichBodyFromDeliverableItems(body) {
@@ -2566,13 +2555,7 @@ function enrichBodyFromDeliverableItems(body) {
         ? body.deliverables
         : deliverablesJoinedText(body.deliverableItems),
     dueDate: body.dueDate !== undefined ? body.dueDate : first.dueDate,
-    status: body.status !== undefined ? body.status : first.status,
-    dealStage: body.dealStage !== undefined ? body.dealStage : first.dealStage,
-    winOrLoss: body.winOrLoss !== undefined ? body.winOrLoss : first.winOrLoss,
     closedDate: body.closedDate !== undefined ? body.closedDate : first.closedDate,
-    value: body.value !== undefined ? body.value : first.value,
-    currency: body.currency !== undefined ? body.currency : first.currency,
-    notes: body.notes !== undefined ? body.notes : first.notes,
   };
 }
 
@@ -2585,8 +2568,8 @@ function syncDeliverableItems(opportunityId, tenantId, items) {
   const insert = db.prepare(
     `INSERT INTO opportunity_deliverables (
       id, opportunity_id, tenant_id, deliverable_type, due_date, start_date, closed_date,
-      deal_stage, status, win_or_loss, value, currency, notes, sort_order, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      notes, sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   for (let i = 0; i < items.length; i += 1) {
@@ -2599,11 +2582,6 @@ function syncDeliverableItems(opportunityId, tenantId, items) {
       String(item.dueDate || ''),
       item.startDate || null,
       item.closedDate || null,
-      String(item.dealStage || 'Discovery'),
-      String(item.status || 'Not Started'),
-      String(item.winOrLoss || 'Open'),
-      Number(item.value || 0),
-      String(item.currency || 'USD'),
       String(item.notes || ''),
       i,
       now,
@@ -2618,23 +2596,11 @@ function syncDeliverableItems(opportunityId, tenantId, items) {
       `UPDATE opportunities SET
         due_date = ?,
         closed_date = ?,
-        deal_stage = ?,
-        status = ?,
-        win_or_loss = ?,
-        value = ?,
-        currency = ?,
-        notes = ?,
         deliverables = ?
       WHERE id = ? AND tenant_id = ?`
     ).run(
       String(first.dueDate || ''),
       first.closedDate || null,
-      String(first.dealStage || 'Discovery'),
-      String(first.status || 'Not Started'),
-      String(first.winOrLoss || 'Open'),
-      Number(first.value || 0),
-      String(first.currency || 'USD'),
-      String(first.notes || ''),
       deliverables,
       opportunityId,
       tenantId
@@ -4346,6 +4312,11 @@ function reminderMessage(daysRemaining, prospect, dueDate) {
   return `${prospect} is due in ${daysRemaining} days (${dueDate})`;
 }
 
+function deliverableNotificationSubject(deliverableType, prospect) {
+  const type = String(deliverableType || '').trim();
+  return type ? `${type} for ${prospect}` : prospect;
+}
+
 function mapArtifactRow(r, tenantId = DEFAULT_TENANT_ID) {
   return {
     id: r.id,
@@ -4549,15 +4520,26 @@ function runNotificationEvaluator() {
   const future = new Date(startOfDay(today) + 30 * 86400000)
     .toISOString()
     .slice(0, 10);
-  const opps = db
+  const deliverables = db
     .prepare(
-      `SELECT id, tenant_id, prospect, due_date, status, archived, is_draft
-       FROM opportunities
-       WHERE COALESCE(archived,0) = 0
-         AND COALESCE(is_draft,0) = 0
-         AND status <> 'Completed'
-         AND due_date IS NOT NULL
-         AND due_date <= ?`
+      `SELECT
+        d.id AS deliverable_id,
+        d.opportunity_id,
+        d.tenant_id,
+        d.deliverable_type,
+        d.due_date,
+        d.status,
+        o.prospect,
+        o.archived,
+        o.is_draft
+      FROM opportunity_deliverables d
+      JOIN opportunities o ON o.id = d.opportunity_id
+      WHERE COALESCE(o.archived, 0) = 0
+        AND COALESCE(o.is_draft, 0) = 0
+        AND o.status <> 'Completed'
+        AND d.due_date IS NOT NULL
+        AND d.due_date <> ''
+        AND d.due_date <= ?`
     )
     .all(future);
   const offsetsByTenant = new Map();
@@ -4570,31 +4552,32 @@ function runNotificationEvaluator() {
      )`
   );
 
-  for (const o of opps) {
+  for (const d of deliverables) {
     let due;
     try {
-      due = new Date(o.due_date + 'T12:00:00');
+      due = new Date(d.due_date + 'T12:00:00');
     } catch {
       continue;
     }
     const dd = Math.floor(dayDiff(due, today));
-    const tenantId = o.tenant_id || DEFAULT_TENANT_ID;
+    const tenantId = d.tenant_id || DEFAULT_TENANT_ID;
     if (!offsetsByTenant.has(tenantId)) {
       offsetsByTenant.set(tenantId, getReminderOffsetsForEvaluator(tenantId));
     }
     const offsets = offsetsByTenant.get(tenantId);
+    const subject = deliverableNotificationSubject(d.deliverable_type, d.prospect);
 
     if (dd < 0) {
       insert.run({
         id: randomUUID(),
         tenant_id: tenantId,
-        opportunity_id: o.id,
+        opportunity_id: d.opportunity_id,
         type: 'OVERDUE',
         channel: 'IN_APP',
         state: 'SENT',
         trigger_at: nowIso(),
-        idempotency_key: `${tenantId}|overdue|${o.id}|${o.due_date}`,
-        message: `${o.prospect} is overdue (due ${o.due_date})`,
+        idempotency_key: `${tenantId}|overdue|${d.deliverable_id}|${d.due_date}`,
+        message: `${subject} is overdue (due ${d.due_date})`,
         created_at: nowIso(),
       });
       continue;
@@ -4606,13 +4589,13 @@ function runNotificationEvaluator() {
       insert.run({
         id: randomUUID(),
         tenant_id: tenantId,
-        opportunity_id: o.id,
+        opportunity_id: d.opportunity_id,
         type,
         channel: 'IN_APP',
         state: 'SENT',
         trigger_at: nowIso(),
-        idempotency_key: `${tenantId}|r${off}|${o.id}|${o.due_date}`,
-        message: reminderMessage(off, o.prospect, o.due_date),
+        idempotency_key: `${tenantId}|r${off}|${d.deliverable_id}|${d.due_date}`,
+        message: reminderMessage(off, subject, d.due_date),
         created_at: nowIso(),
       });
     }

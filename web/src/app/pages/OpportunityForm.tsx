@@ -44,6 +44,11 @@ interface FormData {
   prospectType: string;
   engagementType: string;
   firstPresalesCall: string;
+  dealStage: string;
+  status: string;
+  winOrLoss: string;
+  value: string;
+  currency: string;
 }
 
 type DeliverableFormItem = {
@@ -52,11 +57,6 @@ type DeliverableFormItem = {
   dueDate: string;
   startDate: string;
   closedDate: string;
-  dealStage: string;
-  status: string;
-  winOrLoss: string;
-  value: string;
-  currency: string;
   notes: string;
 };
 
@@ -67,11 +67,6 @@ function createBlankDeliverable(): DeliverableFormItem {
     dueDate: "",
     startDate: "",
     closedDate: "",
-    dealStage: "Discovery",
-    status: "Not Started",
-    winOrLoss: "Open",
-    value: "",
-    currency: "USD",
     notes: "",
   };
 }
@@ -83,6 +78,11 @@ const initialFormData: FormData = {
   prospectType: "",
   engagementType: "",
   firstPresalesCall: "",
+  dealStage: "Discovery",
+  status: "Not Started",
+  winOrLoss: "Open",
+  value: "",
+  currency: "USD",
 };
 
 const DEFAULT_PT = [
@@ -174,6 +174,11 @@ export function OpportunityForm() {
         prospectType: o.prospectType,
         engagementType: o.engagementType,
         firstPresalesCall: o.firstPresalesCall || "",
+        dealStage: o.dealStage || "Discovery",
+        status: o.status,
+        winOrLoss: o.winOrLoss,
+        value: String(o.value ?? ""),
+        currency: o.currency || "USD",
       });
       if (o.deliverableItems?.length) {
         setDeliverableItems(
@@ -183,11 +188,6 @@ export function OpportunityForm() {
             dueDate: d.dueDate,
             startDate: d.startDate || "",
             closedDate: d.closedDate || "",
-            dealStage: d.dealStage || "Discovery",
-            status: d.status,
-            winOrLoss: d.winOrLoss,
-            value: String(d.value ?? ""),
-            currency: d.currency || "USD",
             notes: d.notes || "",
           }))
         );
@@ -203,11 +203,6 @@ export function OpportunityForm() {
             dueDate: o.dueDate,
             startDate: "",
             closedDate: o.closedDate || "",
-            dealStage: o.dealStage || "Discovery",
-            status: o.status,
-            winOrLoss: o.winOrLoss,
-            value: String(o.value ?? ""),
-            currency: o.currency || "USD",
             notes: o.notes || "",
           },
         ]);
@@ -351,6 +346,14 @@ export function OpportunityForm() {
       newErrors.engagementType = "Engagement type is required";
     }
 
+    if (requiredFor("dealStage", true) && !formData.dealStage) {
+      newErrors.dealStage = "Deal stage is required";
+    }
+
+    if (formData.value && isNaN(Number(formData.value))) {
+      newErrors.value = "Value must be a number";
+    }
+
     if (deliverableItems.length === 0) {
       newDeliverableErrors[0] = {
         deliverableType: "At least one deliverable is required",
@@ -368,12 +371,6 @@ export function OpportunityForm() {
         newDeliverableErrors[index] = {
           ...newDeliverableErrors[index],
           deliverableType: "Deliverable type is required",
-        };
-      }
-      if (item.value && isNaN(Number(item.value))) {
-        newDeliverableErrors[index] = {
-          ...newDeliverableErrors[index],
-          value: "Value must be a number",
         };
       }
     });
@@ -460,17 +457,17 @@ export function OpportunityForm() {
         dueDate: item.dueDate,
         startDate: item.startDate || null,
         closedDate: item.closedDate || null,
-        dealStage: item.dealStage,
-        status: item.status,
-        winOrLoss: item.winOrLoss,
-        value: Number(item.value) || 0,
-        currency: item.currency,
         notes: item.notes,
       })),
       customFields: sanitizeCustomFields(),
       prospectType: formData.prospectType,
       engagementType: formData.engagementType,
       firstPresalesCall: formData.firstPresalesCall || null,
+      dealStage: formData.dealStage,
+      status: formData.status,
+      winOrLoss: formData.winOrLoss,
+      value: Number(formData.value) || 0,
+      currency: formData.currency,
       isDraft,
     };
   };
@@ -482,12 +479,7 @@ export function OpportunityForm() {
     if (deliverableItems.length > 0) {
       const first = deliverableItems[0];
       if (key === "dueDate") return first.dueDate;
-      if (key === "status") return first.status;
-      if (key === "winOrLoss") return first.winOrLoss;
-      if (key === "dealStage") return first.dealStage;
       if (key === "closedDate") return first.closedDate;
-      if (key === "value") return first.value;
-      if (key === "currency") return first.currency;
       if (key === "notes") return first.notes;
       if (key === "deliverables") return first.deliverableType;
     }
@@ -542,6 +534,11 @@ export function OpportunityForm() {
       addIfEmpty("prospectType", "Prospect Type", formData.prospectType);
       addIfEmpty("engagementType", "Type of Engagement", formData.engagementType);
       addIfEmpty("firstPresalesCall", "First Presales Call", formData.firstPresalesCall);
+      addIfEmpty("dealStage", "Deal stage", formData.dealStage);
+      addIfEmpty("status", "Status", formData.status);
+      addIfEmpty("winOrLoss", "Win or Loss", formData.winOrLoss);
+      addIfEmpty("value", "Value", formData.value);
+      addIfEmpty("currency", "Currency", formData.currency);
 
       deliverableItems.forEach((item, index) => {
         const prefix = deliverableItems.length > 1 ? `Deliverable ${index + 1} — ` : "";
@@ -551,26 +548,11 @@ export function OpportunityForm() {
         if (fieldVisible("dueDate") && !item.dueDate) {
           empties.push(`${prefix}Due Date`);
         }
-        if (fieldVisible("status") && !item.status) {
-          empties.push(`${prefix}Status`);
-        }
-        if (fieldVisible("dealStage") && !item.dealStage) {
-          empties.push(`${prefix}Deal stage`);
-        }
-        if (fieldVisible("winOrLoss") && !item.winOrLoss) {
-          empties.push(`${prefix}Win or Loss`);
-        }
         if (fieldVisible("closedDate") && !item.closedDate) {
           empties.push(`${prefix}Closed Date`);
         }
         if (fieldVisible("notes") && !item.notes.trim()) {
           empties.push(`${prefix}Notes`);
-        }
-        if (fieldVisible("value") && !item.value) {
-          empties.push(`${prefix}Value`);
-        }
-        if (fieldVisible("currency") && !item.currency) {
-          empties.push(`${prefix}Currency`);
         }
       });
 
@@ -1020,6 +1002,71 @@ export function OpportunityForm() {
                 options={engagementTypeSelectOptions}
               />
             </div>
+
+            {fieldVisible("firstPresalesCall") ? (
+              <Input
+                label={fieldLabel("firstPresalesCall", "First Presales Call")}
+                name="firstPresalesCall"
+                type="date"
+                value={formData.firstPresalesCall}
+                onChange={handleChange}
+              />
+            ) : null}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Select
+                label={fieldLabel("dealStage", "Deal stage")}
+                name="dealStage"
+                value={formData.dealStage}
+                onChange={handleChange}
+                error={errors.dealStage}
+                required={fieldRequired("dealStage", true)}
+                options={dealStageSelectOptions}
+              />
+
+              <Select
+                label={fieldLabel("status", "Status")}
+                name="status"
+                value={formData.status}
+                onChange={handleChange}
+                required={fieldRequired("status", true)}
+                options={statusSelectOptions}
+              />
+
+              <Select
+                label={fieldLabel("winOrLoss", "Win or Loss")}
+                name="winOrLoss"
+                value={formData.winOrLoss}
+                onChange={handleChange}
+                required={fieldRequired("winOrLoss", true)}
+                options={winLossSelectOptions}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {fieldVisible("value") ? (
+                <Input
+                  label={fieldLabel("value", "Value")}
+                  name="value"
+                  type="number"
+                  value={formData.value}
+                  onChange={handleChange}
+                  error={errors.value}
+                  placeholder="0"
+                />
+              ) : null}
+
+              {fieldVisible("currency") ? (
+                <Select
+                  label={fieldLabel("currency", "Currency")}
+                  name="currency"
+                  value={formData.currency}
+                  onChange={handleChange}
+                  required={fieldRequired("currency", true)}
+                  options={currencySelectOptions}
+                />
+              ) : null}
+            </div>
           </CardContent>
         </Card>
 
@@ -1089,65 +1136,6 @@ export function OpportunityForm() {
                 ) : null}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Select
-                  label={fieldLabel("dealStage", "Deal stage")}
-                  value={item.dealStage}
-                  onChange={(e) =>
-                    updateDeliverableItem(index, "dealStage", e.target.value)
-                  }
-                  required={fieldRequired("dealStage", true)}
-                  options={dealStageSelectOptions}
-                />
-
-                <Select
-                  label={fieldLabel("status", "Status")}
-                  value={item.status}
-                  onChange={(e) =>
-                    updateDeliverableItem(index, "status", e.target.value)
-                  }
-                  required={fieldRequired("status", true)}
-                  options={statusSelectOptions}
-                />
-
-                <Select
-                  label={fieldLabel("winOrLoss", "Win or Loss")}
-                  value={item.winOrLoss}
-                  onChange={(e) =>
-                    updateDeliverableItem(index, "winOrLoss", e.target.value)
-                  }
-                  required={fieldRequired("winOrLoss", true)}
-                  options={winLossSelectOptions}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {fieldVisible("value") ? (
-                  <Input
-                    label={fieldLabel("value", "SOW Value")}
-                    type="number"
-                    value={item.value}
-                    onChange={(e) =>
-                      updateDeliverableItem(index, "value", e.target.value)
-                    }
-                    error={deliverableErrors[index]?.value}
-                    placeholder="0"
-                  />
-                ) : null}
-
-                {fieldVisible("currency") ? (
-                  <Select
-                    label={fieldLabel("currency", "Currency")}
-                    value={item.currency}
-                    onChange={(e) =>
-                      updateDeliverableItem(index, "currency", e.target.value)
-                    }
-                    required={fieldRequired("currency", true)}
-                    options={currencySelectOptions}
-                  />
-                ) : null}
-              </div>
-
               {fieldVisible("notes") ? (
                 <div>
                   <label
@@ -1176,16 +1164,6 @@ export function OpportunityForm() {
           <Plus className="w-4 h-4" />
           Add Deliverable
         </Button>
-
-        {fieldVisible("firstPresalesCall") ? (
-          <Input
-            label={fieldLabel("firstPresalesCall", "First Presales Call")}
-            name="firstPresalesCall"
-            type="date"
-            value={formData.firstPresalesCall}
-            onChange={handleChange}
-          />
-        ) : null}
 
         {customSchemaFields.length > 0 ||
         (techStackField && fieldVisible("techStack")) ? (

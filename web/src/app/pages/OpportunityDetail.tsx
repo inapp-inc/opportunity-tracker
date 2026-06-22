@@ -373,28 +373,6 @@ export function OpportunityDetail() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, "default" | "info" | "success"> = {
-      "Not Started": "default",
-      "In Progress": "info",
-      Completed: "success",
-    };
-    return (
-      <Badge variant={variants[status] || "default"}>{status}</Badge>
-    );
-  };
-
-  const getWinLossBadge = (winLoss: string) => {
-    const variants: Record<string, "success" | "danger" | "warning"> = {
-      Win: "success",
-      Loss: "danger",
-      Open: "warning",
-    };
-    return (
-      <Badge variant={variants[winLoss] || "warning"}>{winLoss}</Badge>
-    );
-  };
-
   const isOverdue = useMemo(() => {
     if (!opp || opp.status === "Completed") return false;
     const due = new Date(opp.dueDate + "T12:00:00");
@@ -684,32 +662,18 @@ export function OpportunityDetail() {
                 {opp.deliverableItems.map((item, index) => (
                   <Card key={item.id}>
                     <CardHeader>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <CardTitle className="text-base">
-                          {item.deliverableType || `Deliverable ${index + 1}`}
-                        </CardTitle>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {getStatusBadge(item.status)}
-                          {getWinLossBadge(item.winOrLoss)}
-                        </div>
-                      </div>
+                      <CardTitle className="text-base">
+                        {item.deliverableType || `Deliverable ${index + 1}`}
+                      </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <Metric label="Due Date" value={item.dueDate || "—"} />
-                      {item.startDate ? (
-                        <Metric label="Start Date" value={item.startDate} />
-                      ) : null}
-                      {item.closedDate ? (
-                        <Metric label="Closed Date" value={item.closedDate} />
-                      ) : null}
-                      <Metric label="Deal Stage" value={item.dealStage || "Discovery"} />
                       <Metric
-                        label="Value"
-                        value={formatMoney(Number(item.value || 0), item.currency)}
+                        label="Build Start Date"
+                        value={item.startDate || "—"}
                       />
-                      {item.notes ? (
-                        <Metric label="Notes" value={item.notes} multiline />
-                      ) : null}
+                      <Metric label="Closed Date" value={item.closedDate || "—"} />
+                      <Metric label="Notes" value={item.notes || "—"} multiline />
                     </CardContent>
                   </Card>
                 ))}

@@ -28,11 +28,6 @@ export type OpportunityDeliverable = {
   dueDate: string;
   startDate?: string | null;
   closedDate?: string | null;
-  dealStage: string;
-  status: string;
-  winOrLoss: string;
-  value: number;
-  currency: string;
   notes: string;
   sortOrder: number;
 };
