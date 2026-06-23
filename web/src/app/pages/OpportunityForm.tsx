@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useParams, useNavigate, Link } from "react-router";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
@@ -103,6 +103,7 @@ export function OpportunityForm() {
   /** edit route uses :id/edit; param is `id` */
   const editId = params.id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isEdit = !!editId;
   const canCreate = useCanCreateRecords();
   const canUpdate = useCanEdit();
@@ -128,6 +129,16 @@ export function OpportunityForm() {
     labels: string[];
     mode: "publish" | "draft";
   }>({ open: false, labels: [], mode: "publish" });
+  const [prospectSuggestions, setProspectSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    if (isEdit) return;
+    const prospect = searchParams.get("prospect");
+    if (prospect) {
+      setFormData((prev) => ({ ...prev, prospect: decodeURIComponent(prospect) }));
+    }
+  }, [isEdit, searchParams]);
 
   useEffect(() => {
     if (isEdit && !canUpdate) {
@@ -230,6 +241,57 @@ export function OpportunityForm() {
     if (errors[name as keyof FormData]) {
       setErrors((prev) => ({ ...prev, [name]: undefined }));
     }
+  };
+
+  const handleProspectInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setFormData((prev) => ({ ...prev, prospect: value }));
+    if (errors.prospect) {
+      setErrors((prev) => ({ ...prev, prospect: undefined }));
+    }
+    if (value.length >= 1) {
+      void apiFetch<{ items: { name: string }[] }>(
+        `/prospect-groups?q=${encodeURIComponent(value)}`
+      )
+        .then((res) => {
+          setProspectSuggestions((res.items || []).map((item) => item.name));
+          setShowSuggestions(true);
+        })
+        .catch(() => setProspectSuggestions([]));
+    } else {
+      setProspectSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const selectProspectSuggestion = (name: string) => {
+    setShowSuggestions(false);
+    void apiFetch<{ items: ApiOpportunity[] }>(
+      `/prospect-groups/${encodeURIComponent(name)}/records`
+    )
+      .then((res) => {
+        const items = res.items || [];
+        if (items.length > 0) {
+          setFormData((prev) => ({
+            ...prev,
+            prospect: name,
+            description: items[0].opportunityDescription || prev.description,
+            firstPresalesCall: items[0].firstPresalesCall || prev.firstPresalesCall,
+            prospectType: items[0].prospectType || prev.prospectType,
+            engagementType: items[0].engagementType || prev.engagementType,
+            dealStage: items[0].dealStage || prev.dealStage,
+            winLoss: items[0].winOrLoss || prev.winLoss,
+            value: items[0].value ? String(items[0].value) : prev.value,
+            currency: items[0].currency || prev.currency,
+            ownerIds: items[0].ownerIds?.length ? items[0].ownerIds : prev.ownerIds,
+          }));
+        } else {
+          setFormData((prev) => ({ ...prev, prospect: name }));
+        }
+      })
+      .catch(() => {
+        setFormData((prev) => ({ ...prev, prospect: name }));
+      });
   };
 
   const setFormField = (name: keyof FormData, value: string) => {
@@ -875,15 +937,34 @@ export function OpportunityForm() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label={fieldLabel("prospect", "Prospect")}
-                name="prospect"
-                value={formData.prospect}
-                onChange={handleChange}
-                error={errors.prospect}
-                required={fieldRequired("prospect", true)}
-                placeholder="e.g., Acme Corporation"
-              />
+              <div className="relative">
+                <Input
+                  label={fieldLabel("prospect", "Prospect")}
+                  name="prospect"
+                  value={formData.prospect}
+                  onChange={handleProspectInput}
+                  onFocus={() => {
+                    if (formData.prospect.length >= 1) setShowSuggestions(true);
+                  }}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  error={errors.prospect}
+                  required={fieldRequired("prospect", true)}
+                  placeholder="e.g., Acme Corporation"
+                />
+                {showSuggestions && prospectSuggestions.length > 0 ? (
+                  <ul className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {prospectSuggestions.map((name) => (
+                      <li
+                        key={name}
+                        className="px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                        onMouseDown={() => selectProspectSuggestion(name)}
+                      >
+                        {name}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
 
             </div>
 

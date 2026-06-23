@@ -7,6 +7,7 @@ import { tenantRoleFromLegacyRole } from "./roles";
 export type PageKey =
   | "dashboard"
   | "records"
+  | "opportunities"
   | "artifacts"
   | "caseStudies"
   | "notifications"
@@ -28,11 +29,12 @@ function cacheKey() {
 }
 
 const DEFAULT_ACCESS: PageAccessConfig = {
-  pages: ["dashboard", "records", "artifacts", "caseStudies", "notifications", "reports", "settings"],
+  pages: ["dashboard", "records", "opportunities", "artifacts", "caseStudies", "notifications", "reports", "settings"],
   roles: {
     TENANT_ADMIN: {
       dashboard: { read: true, write: false },
       records: { read: true, write: true },
+      opportunities: { read: true, write: false },
       artifacts: { read: true, write: true },
       caseStudies: { read: true, write: false },
       notifications: { read: true, write: false },
@@ -42,6 +44,7 @@ const DEFAULT_ACCESS: PageAccessConfig = {
     MANAGER: {
       dashboard: { read: true, write: false },
       records: { read: true, write: true },
+      opportunities: { read: true, write: false },
       artifacts: { read: true, write: true },
       caseStudies: { read: true, write: false },
       notifications: { read: true, write: false },
@@ -51,6 +54,7 @@ const DEFAULT_ACCESS: PageAccessConfig = {
     VIEWER: {
       dashboard: { read: true, write: false },
       records: { read: true, write: false },
+      opportunities: { read: true, write: false },
       artifacts: { read: true, write: false },
       caseStudies: { read: true, write: false },
       notifications: { read: true, write: false },

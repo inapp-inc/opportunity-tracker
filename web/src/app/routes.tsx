@@ -23,6 +23,12 @@ const OpportunityDetail = lazy(() =>
 const OpportunityForm = lazy(() =>
   import("./pages/OpportunityForm").then((m) => ({ default: m.OpportunityForm }))
 );
+const ProspectGroupsPage = lazy(() =>
+  import("./pages/ProspectGroupsPage").then((m) => ({ default: m.ProspectGroupsPage }))
+);
+const ProspectGroupDetail = lazy(() =>
+  import("./pages/ProspectGroupDetail").then((m) => ({ default: m.ProspectGroupDetail }))
+);
 const NotificationsCenter = lazy(() =>
   import("./pages/NotificationsCenter").then((m) => ({
     default: m.NotificationsCenter,
@@ -109,6 +115,22 @@ export const router = createBrowserRouter([
             element: lazyElement(
               <PageAccessGuard page="records">
                 <OpportunityForm />
+              </PageAccessGuard>
+            ),
+          },
+          {
+            path: "prospect-groups",
+            element: lazyElement(
+              <PageAccessGuard page="opportunities">
+                <ProspectGroupsPage />
+              </PageAccessGuard>
+            ),
+          },
+          {
+            path: "prospect-groups/:prospect",
+            element: lazyElement(
+              <PageAccessGuard page="opportunities">
+                <ProspectGroupDetail />
               </PageAccessGuard>
             ),
           },

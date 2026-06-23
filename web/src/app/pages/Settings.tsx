@@ -40,6 +40,7 @@ import { updatePageAccessCache, type PageAccessConfig, type PageKey, type PagePe
 const PAGE_LABELS: Record<PageKey, string> = {
   dashboard: "Dashboard",
   records: "Records",
+  opportunities: "Opportunities",
   artifacts: "Artifact Links",
   caseStudies: "Case Studies",
   notifications: "Notifications",

@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   Zap,
   Link2,
+  Target,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AuthUserProvider, useAuthUser } from "../contexts/AuthUserContext";
@@ -72,6 +73,9 @@ function MainLayoutShell() {
       : null,
     canAccessPage("records")
       ? { path: "/app/opportunities", icon: Briefcase, label: terminology.recordPlural }
+      : null,
+    canAccessPage("opportunities")
+      ? { path: "/app/prospect-groups", icon: Target, label: "Opportunities" }
       : null,
     canAccessPage("artifacts")
       ? { path: "/app/artifacts", icon: Link2, label: "Artifact Links" }

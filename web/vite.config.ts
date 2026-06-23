@@ -39,6 +39,7 @@ export default defineConfig({
       '/platform': { target: 'http://localhost:3001', changeOrigin: true },
       '/tenants': { target: 'http://localhost:3001', changeOrigin: true },
       '/export': { target: 'http://localhost:3001', changeOrigin: true },
+      '/prospect-groups': { target: 'http://localhost:3001', changeOrigin: true },
     },
   },
   resolve: {
