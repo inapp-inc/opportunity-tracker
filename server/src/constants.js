@@ -11,7 +11,9 @@ export const STATIC_AUTH_EMAIL =
   process.env.STATIC_AUTH_EMAIL || 'demo@example.com';
 export const STATIC_AUTH_PASSWORD =
   process.env.STATIC_AUTH_PASSWORD || 'password';
-export const STATIC_AUTH_ENABLED = process.env.NODE_ENV !== 'production';
+export const STATIC_AUTH_ENABLED =
+  process.env.STATIC_AUTH_ENABLED === 'true' ||
+  process.env.NODE_ENV !== 'production';
 
 export const CORS_ORIGINS = String(process.env.CORS_ORIGINS || '')
   .split(',')

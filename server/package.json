@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "dev": "node --watch --env-file=.env src/index.js",
     "test": "node --env-file=.env --test",
     "seed": "node --env-file=.env src/seed-dev.js"
   },

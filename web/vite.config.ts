@@ -27,6 +27,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    host: '0.0.0.0',
     proxy: {
       '/auth': { target: 'http://localhost:3001', changeOrigin: true },
       '/records': { target: 'http://localhost:3001', changeOrigin: true },
