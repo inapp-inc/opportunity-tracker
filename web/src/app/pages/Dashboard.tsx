@@ -257,15 +257,20 @@ export function Dashboard() {
           })
           .filter(Boolean) as { widgetId: string; promise: Promise<any> }[];
 
-        const results = await Promise.all(supported.map((s) => s.promise));
+        const results = await Promise.allSettled(supported.map((s) => s.promise));
         if (cancelled) return;
 
         const next: typeof analyticsByWidget = {};
         for (let i = 0; i < supported.length; i++) {
-          next[supported[i].widgetId] = results[i];
+          const result = results[i];
+          if (result.status === "fulfilled") {
+            next[supported[i].widgetId] = result.value;
+          }
         }
         setAnalyticsByWidget(next);
       } catch (e) {
+        // Analytics is optional — if the endpoint isn't available, the dashboard
+        // falls back to its existing stats without surfacing an error to the user.
         if (!cancelled) {
           setAnalyticsLoadError(
             e instanceof Error ? e.message : "Failed to load analytics"
@@ -488,12 +493,6 @@ export function Dashboard() {
 
   return (
     <div className="mx-auto max-w-screen-2xl space-y-6 p-6">
-      {analyticsLoadError ? (
-        <div className="rounded-xl border border-yellow-300 bg-yellow-50 p-4 text-sm text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-100">
-          {analyticsLoadError}
-        </div>
-      ) : null}
-
       <PageHeader
         eyebrow="Overview"
         title={dashboardConfig.title}
