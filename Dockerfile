@@ -18,6 +18,12 @@ COPY web ./web
 RUN npm --prefix web run build
 
 FROM node:20-bookworm-slim AS runtime
+# Install PostgreSQL alongside Node so everything runs in one container
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends postgresql \
+  && rm -rf /var/lib/apt/lists/*
+# Add PostgreSQL binaries to PATH
+RUN echo "export PATH=\"$(find /usr/lib/postgresql/*/bin -maxdepth 0 -type d | sort -V | tail -1):\$PATH\"" >> /etc/profile.d/pg.sh
 WORKDIR /app
 ENV NODE_ENV=production \
   SERVE_STATIC=1 \
@@ -27,5 +33,9 @@ ENV NODE_ENV=production \
 COPY --from=server-deps /app/server/node_modules ./server/node_modules
 COPY server ./server
 COPY --from=web-build /app/web/dist ./web/dist
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+# Persist database across container restarts
+VOLUME ["/var/lib/postgresql/data"]
 EXPOSE 4000
-CMD ["npm", "--prefix", "server", "start"]
+CMD ["/entrypoint.sh"]

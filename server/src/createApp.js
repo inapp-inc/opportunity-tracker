@@ -49,9 +49,8 @@ export function createApp() {
     cors({
       origin(origin, callback) {
         if (!origin) return callback(null, true);
-        if (!CORS_ORIGINS.length && process.env.NODE_ENV !== 'production') {
-          return callback(null, true);
-        }
+        // If no allowlist is configured, permit all origins
+        if (!CORS_ORIGINS.length) return callback(null, true);
         if (CORS_ORIGINS.includes(origin)) return callback(null, true);
         return callback(new Error('CORS origin not allowed'));
       },
