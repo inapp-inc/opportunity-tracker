@@ -45,7 +45,7 @@ const owners = { sarahId, rajId, emmaId, jamesId, priyaId };
 const insertUser = db.prepare(
   `INSERT INTO users (
     id, tenant_id, email, password_hash, name, role, platform_role, status, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, 'MEMBER', 'NONE', 'ACTIVE', ?, ?)`
+  ) VALUES (?, ?, ?, ?, ?, 'MANAGER', 'NONE', 'ACTIVE', ?, ?)`
 );
 
 const teamMembers = [
@@ -63,7 +63,7 @@ for (const member of teamMembers) {
 const insertMembership = db.prepare(
   `INSERT OR IGNORE INTO tenant_memberships (
     id, user_id, tenant_id, role, permissions_json, status, created_at, updated_at
-  ) VALUES (?, ?, ?, 'MEMBER', '[]', 'ACTIVE', ?, ?)`
+  ) VALUES (?, ?, ?, 'MANAGER', '[]', 'ACTIVE', ?, ?)`
 );
 
 for (const member of teamMembers) {
