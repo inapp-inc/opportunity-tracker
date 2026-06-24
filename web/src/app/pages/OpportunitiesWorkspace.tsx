@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Button } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
 import { Badge } from "../components/ui/Badge";
@@ -47,11 +47,12 @@ import {
   type ListTableLayout,
 } from "../lib/listTableLayout";
 import { WORKSPACE_LAYOUT_EVENT } from "../lib/pageLayoutEvents";
-import { useAuthUser } from "../contexts/AuthUserContext";
 import {
-  ownerLabels,
-  type ApiOpportunity,
-} from "../lib/opportunity";
+  mapApiOpportunity,
+  type WorkspaceOpportunity,
+} from "../hooks/opportunity/types";
+import { useWorkspaceFilters } from "../hooks/useWorkspaceFilters";
+import type { ApiOpportunity } from "../lib/opportunity";
 import { lowerFirst, useTerminology } from "../lib/terminology";
 import { formatCustomValue, type CustomFieldValue } from "../lib/fields";
 import { catalogValueList, filterSelectOptions } from "../lib/lookupOptions";
@@ -60,51 +61,7 @@ import { formatMoney } from "../lib/format";
 import { Modal } from "../components/ui/Modal";
 import { computeSummaryCards, normalizeSummaryCardsConfig, type SummaryCardsConfig } from "../lib/summaryCards";
 
-interface Opportunity {
-  id: string;
-  prospect: string;
-  description: string;
-  owner: string[];
-  ownerIds: string[];
-  deliverables: string;
-  dueDate: string;
-  status: "Not Started" | "In Progress" | "Completed";
-  winLoss: "Win" | "Loss" | "Open";
-  dealStage: string;
-  value: number;
-  currency: string;
-  prospectType: string;
-  engagementType: string;
-  customFields: Record<string, CustomFieldValue>;
-  version: number;
-  archived: boolean;
-  isDraft: boolean;
-}
-
-function mapApi(o: ApiOpportunity): Opportunity {
-  return {
-    id: o.id,
-    prospect: o.prospect,
-    description: o.opportunityDescription,
-    owner: ownerLabels(o),
-    ownerIds: o.ownerIds || [],
-    deliverables: Array.isArray(o.deliverables)
-      ? o.deliverables.join(", ")
-      : String(o.deliverables || ""),
-    dueDate: o.dueDate,
-    status: o.status,
-    winLoss: o.winOrLoss,
-    dealStage: o.dealStage || "Discovery",
-    value: Number(o.value || 0),
-    currency: o.currency || "USD",
-    prospectType: o.prospectType,
-    engagementType: o.engagementType,
-    customFields: o.customFields || {},
-    version: o.version,
-    archived: !!o.archived,
-    isDraft: !!o.isDraft,
-  };
-}
+type Opportunity = WorkspaceOpportunity;
 
 function startOfDay(d: Date) {
   const x = new Date(d);
@@ -120,18 +77,8 @@ export function OpportunitiesWorkspace() {
   const canManageTenantSettings = useCanManageTenantSettings();
   const isPlatformAdmin = useIsPlatformAdmin();
   const canEditLayouts = canManageTenantSettings || isPlatformAdmin;
-  const { user } = useAuthUser();
   const terminology = useTerminology();
-  const [searchParams] = useSearchParams();
-  const initialSearch = searchParams.get("search") || searchParams.get("q") || "";
-  const initialFilter = searchParams.get("filter") || "";
-  const initialDealStage = searchParams.get("dealStage") || "all";
-  const initialStatus = searchParams.get("status") || "all";
-  const initialWinOrLoss = searchParams.get("winOrLoss") || "all";
-  const initialProspectType = searchParams.get("prospectType") || "all";
-  const initialEngagementType = searchParams.get("engagementType") || "all";
-  const initialCustomField = searchParams.get("customField") || "";
-  const initialCustomValue = searchParams.get("customValue") || "";
+  const filters = useWorkspaceFilters();
 
   const [items, setItems] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,24 +86,32 @@ export function OpportunitiesWorkspace() {
   const { users: assignableUsers } = useAssignableUsers();
   const { fields: schemaFields } = useTenantSchema();
 
-  const [searchQuery, setSearchQuery] = useState(initialSearch);
-  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
-  const [statusFilter, setStatusFilter] = useState(initialStatus);
-  const [dealStageFilter, setDealStageFilter] = useState(initialDealStage);
-  const [winOrLossFilter, setWinOrLossFilter] = useState(initialWinOrLoss);
-  const [prospectTypeFilter, setProspectTypeFilter] = useState(initialProspectType);
-  const [engagementTypeFilter, setEngagementTypeFilter] = useState(initialEngagementType);
-  const [customFieldKey, setCustomFieldKey] = useState(initialCustomField);
-  const [customFieldValue, setCustomFieldValue] = useState(initialCustomValue);
-  const [ownerFilter, setOwnerFilter] = useState("all");
-  const [dueFilter, setDueFilter] = useState(
-    initialFilter === "overdue"
-      ? "overdue"
-      : initialFilter === "dueWeek"
-        ? "dueWeek"
-        : "all"
-  );
-  const [archiveScope, setArchiveScope] = useState<"active" | "archived" | "all">("active");
+  const {
+    searchQuery,
+    setSearchQuery,
+    statusFilter,
+    setStatusFilter,
+    dealStageFilter,
+    setDealStageFilter,
+    winOrLossFilter,
+    setWinOrLossFilter,
+    prospectTypeFilter,
+    setProspectTypeFilter,
+    engagementTypeFilter,
+    setEngagementTypeFilter,
+    customFieldKey,
+    setCustomFieldKey,
+    customFieldValue,
+    setCustomFieldValue,
+    ownerFilter,
+    setOwnerFilter,
+    dueFilter,
+    setDueFilter,
+    archiveScope,
+    setArchiveScope,
+    mineFromUrl,
+    buildListQuery,
+  } = filters;
   const [sortField, setSortField] = useState<keyof Opportunity>("dueDate");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -215,54 +170,6 @@ export function OpportunitiesWorkspace() {
     [catalogLookups]
   );
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
-
-  const mineFromUrl = searchParams.get("mine") === "1";
-
-  const buildListQuery = useCallback(() => {
-    const q = new URLSearchParams();
-    const archivedParam =
-      archiveScope === "active" ? "exclude" : archiveScope === "archived" ? "only" : "all";
-    q.set("archived", archivedParam);
-    // Always include drafts in the workspace list; dashboards/analytics still exclude drafts by default.
-    q.set("draft", "include");
-    if (mineFromUrl && user?.sub) q.set("mine", "1");
-    else if (ownerFilter !== "all") q.set("ownerId", ownerFilter);
-    if (debouncedSearch.trim()) q.set("q", debouncedSearch.trim());
-    if (statusFilter !== "all") q.set("status", statusFilter);
-    if (dealStageFilter !== "all") q.set("dealStage", dealStageFilter);
-    if (winOrLossFilter !== "all") q.set("winOrLoss", winOrLossFilter);
-    return q.toString();
-  }, [
-    archiveScope,
-    mineFromUrl,
-    user?.sub,
-    ownerFilter,
-    debouncedSearch,
-    statusFilter,
-    dealStageFilter,
-    winOrLossFilter,
-  ]);
-
-  useEffect(() => {
-    const search = searchParams.get("search") || searchParams.get("q") || "";
-    const filter = searchParams.get("filter") || "";
-    setSearchQuery(search);
-    setStatusFilter(searchParams.get("status") || "all");
-    setDealStageFilter(searchParams.get("dealStage") || "all");
-    setWinOrLossFilter(searchParams.get("winOrLoss") || "all");
-    setProspectTypeFilter(searchParams.get("prospectType") || "all");
-    setEngagementTypeFilter(searchParams.get("engagementType") || "all");
-    setCustomFieldKey(searchParams.get("customField") || "");
-    setCustomFieldValue(searchParams.get("customValue") || "");
-    setDueFilter(
-      filter === "overdue" ? "overdue" : filter === "dueWeek" ? "dueWeek" : "all"
-    );
-  }, [searchParams]);
-
   const loadRecords = useCallback(async (cancelledRef?: { cancelled: boolean }) => {
     setLoading(true);
     try {
@@ -270,7 +177,7 @@ export function OpportunitiesWorkspace() {
         `/records?${buildListQuery()}`
       );
       if (!cancelledRef?.cancelled) {
-        setItems(res.items.map(mapApi));
+        setItems(res.items.map(mapApiOpportunity));
         setLoadError(null);
       }
     } catch (e) {
@@ -352,7 +259,7 @@ export function OpportunitiesWorkspace() {
       const res = await apiFetch<{ items: ApiOpportunity[] }>(
         `/records?${buildListQuery()}`
       );
-      setItems(res.items.map(mapApi));
+      setItems(res.items.map(mapApiOpportunity));
     } catch (e) {
       alert(e instanceof Error ? e.message : "Update failed");
     }

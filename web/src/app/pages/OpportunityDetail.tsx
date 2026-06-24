@@ -35,9 +35,9 @@ import {
 import {
   ownerLabels,
   type ApiOpportunity,
-  type OpportunityActivity,
   type TenantFieldDefinition,
 } from "../lib/opportunity";
+import { useOpportunityDetail, type ArtifactUi } from "../hooks/useOpportunityDetail";
 import { lowerFirst, useTerminology } from "../lib/terminology";
 import { formatCustomValue } from "../lib/fields";
 import type { CaseStudyLayout } from "../lib/caseStudyLayout";
@@ -45,31 +45,9 @@ import { renderCaseStudyLayout } from "../lib/caseStudyRender";
 import { useCaseStudySession } from "../lib/caseStudyConfig";
 import { downloadCaseStudyPng, waitForDomPaint } from "../lib/caseStudyDownload";
 import { catalogValueList } from "../lib/lookupOptions";
-import { useCatalogLookups, useOnTenantLookupsUpdated, useTenantSchema } from "../lib/serverState";
+import { useCatalogLookups, useTenantSchema } from "../lib/serverState";
 import { PageHeader, StatCard, LoadingDisplay } from "../components/shared";
 import { formatDateTimeInZone, formatMoney } from "../lib/format";
-
-type ArtifactUi = {
-  id: string;
-  type: string;
-  url: string;
-  title?: string;
-  addedBy: string;
-  addedOn: string;
-};
-
-type ApiArtifact = ArtifactUi & { artifactType: string };
-
-function mapArtifact(a: ApiArtifact): ArtifactUi {
-  return {
-    id: String(a.id),
-    type: String(a.type || a.artifactType || "Artifact"),
-    url: a.url,
-    title: a.title,
-    addedBy: a.addedBy,
-    addedOn: a.addedOn,
-  };
-}
 
 function activityLabel(kind: string) {
   if (kind === "COMMENT") return "Note";
@@ -171,15 +149,21 @@ export function OpportunityDetail() {
   const canWriteComments = useCanWriteComments();
   const isAdmin = useIsAdmin();
   const terminology = useTerminology();
-  const [opp, setOpp] = useState<ApiOpportunity | null>(null);
-  const [artifacts, setArtifacts] = useState<ArtifactUi[]>([]);
-  const [activity, setActivity] = useState<OpportunityActivity[]>([]);
+  const {
+    opp,
+    setOpp,
+    artifacts,
+    activity,
+    loadError,
+    refreshRecord,
+    reloadArtifacts,
+    reloadActivity,
+  } = useOpportunityDetail(id);
   const { fields: schemaFields } = useTenantSchema();
   const [caseStudyDownloading, setCaseStudyDownloading] = useState(false);
   const caseStudyRef = useRef<HTMLDivElement | null>(null);
   const [commentText, setCommentText] = useState("");
   const [commentSaving, setCommentSaving] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [isArtifactModalOpen, setIsArtifactModalOpen] = useState(false);
   const { lookups: catalogLookups } = useCatalogLookups();
   const artifactTypeOptions = useMemo(() => {
@@ -230,25 +214,9 @@ export function OpportunityDetail() {
 
   useEffect(() => {
     if (!caseStudyTabActive || !id) return;
-    let cancelled = false;
     setReadyToCapture(false);
-    void apiFetch<ApiOpportunity>(`/records/${id}?ts=${Date.now()}`, { cache: "no-store" })
-      .then((record) => {
-        if (!cancelled) setOpp(record);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setLoadError(
-            e instanceof Error
-              ? e.message
-              : `Failed to refresh ${lowerFirst(terminology.recordSingular)}`
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [caseStudyTabActive, id, setReadyToCapture]);
+    void refreshRecord();
+  }, [caseStudyTabActive, id, refreshRecord, setReadyToCapture]);
 
   useEffect(() => {
     if (!caseStudyTabActive || caseStudyConfigLoading || !opp) {
@@ -271,47 +239,10 @@ export function OpportunityDetail() {
     setReadyToCapture,
   ]);
 
-  const loadOpportunity = useCallback(async () => {
-    if (!id) return;
-    try {
-      const [o, arts, acts] = await Promise.all([
-        apiFetch<ApiOpportunity>(`/records/${id}`),
-        apiFetch<{ items: ApiArtifact[] }>(`/records/${id}/artifacts`),
-        apiFetch<{ items: OpportunityActivity[] }>(`/records/${id}/activities`),
-      ]);
-      setOpp(o);
-      setArtifacts((arts.items || []).map(mapArtifact));
-      setActivity(acts.items || []);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(
-        e instanceof Error
-          ? e.message
-          : `Failed to load ${lowerFirst(terminology.recordSingular)}`
-      );
-    }
-  }, [id, terminology.recordSingular]);
-
-  useEffect(() => {
-    void loadOpportunity();
-  }, [loadOpportunity]);
-
-  useOnTenantLookupsUpdated(() => {
-    void loadOpportunity();
-  });
-
   useEffect(() => {
     if (!artifactTypeOptions.length) return;
     setNewArtifact((prev) => ({ ...prev, type: prev.type || artifactTypeOptions[0] }));
   }, [artifactTypeOptions]);
-
-  const reloadArtifacts = async () => {
-    if (!id) return;
-    const arts = await apiFetch<{ items: ApiArtifact[] }>(
-      `/records/${id}/artifacts`
-    );
-    setArtifacts((arts.items || []).map(mapArtifact));
-  };
 
   const handleAddArtifact = async () => {
     if (!canWriteArtifacts) {
@@ -403,14 +334,6 @@ export function OpportunityDetail() {
     today.setHours(0, 0, 0, 0);
     return due < today;
   }, [opp]);
-
-  const reloadActivity = async () => {
-    if (!id) return;
-    const acts = await apiFetch<{ items: OpportunityActivity[] }>(
-      `/records/${id}/activities`
-    );
-    setActivity(acts.items || []);
-  };
 
   const handleAddComment = async () => {
     if (!canWriteComments) {
