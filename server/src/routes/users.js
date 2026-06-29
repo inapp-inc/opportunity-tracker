@@ -30,7 +30,7 @@ import { getPlatformRolesConfig } from '../services/configService.js';
 export function createUsersRouter() {
   const router = express.Router();
 
-  router.get('/assignable', requireTenantPermission(PERMISSIONS.RECORDS_READ), (req, res) => {
+  router.get('/users/assignable', requireTenantPermission(PERMISSIONS.RECORDS_READ), (req, res) => {
     const tenantId = tenantIdFromReq(req);
     const rows = db
       .prepare(

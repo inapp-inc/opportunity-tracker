@@ -44,6 +44,15 @@ export function mapNotificationRow(r) {
 }
 
 export function runNotificationEvaluator() {
+  try {
+    _runNotificationEvaluator();
+  } catch (err) {
+    // Don't crash the process — DB may be temporarily unavailable
+    console.warn('[notifications] evaluator error:', err.message);
+  }
+}
+
+function _runNotificationEvaluator() {
   const today = new Date();
   const future = new Date(startOfDay(today) + 30 * 86400000)
     .toISOString()

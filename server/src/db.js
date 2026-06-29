@@ -443,6 +443,16 @@ export function migrate() {
     }
   }
 
+  // Add status column to tenant_memberships if missing (pre-existing DBs)
+  if (!columnExists('tenant_memberships', 'status')) {
+    db.exec(`ALTER TABLE tenant_memberships ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'`);
+  }
+
+  // Add permissions_json column to tenant_memberships if missing
+  if (!columnExists('tenant_memberships', 'permissions_json')) {
+    db.exec(`ALTER TABLE tenant_memberships ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'`);
+  }
+
   db.prepare(`INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)`).run(
     '2026-05-25-rbac-memberships',
     now
