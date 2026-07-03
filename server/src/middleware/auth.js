@@ -4,6 +4,8 @@ export function createAuthMiddleware({ JWT_SECRET, buildAuthContext, isApiPath }
   return function authMiddleware(req, res, next) {
     if (req.path === '/auth/login') return next();
     if (req.path === '/health') return next();
+    if (req.path.startsWith('/auth/invite/')) return next();
+    if (req.path === '/auth/accept-invite') return next();
     if (req.method === 'GET' && !isApiPath(req.path)) return next();
     const h = req.headers.authorization || '';
     const m = /^Bearer\s+(.+)$/i.exec(h);

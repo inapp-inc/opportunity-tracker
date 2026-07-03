@@ -9,6 +9,9 @@ const SignIn = lazy(() => import("./pages/SignIn").then((m) => ({ default: m.Sig
 const ForgotPassword = lazy(() =>
   import("./pages/ForgotPassword").then((m) => ({ default: m.ForgotPassword }))
 );
+const AcceptInvite = lazy(() =>
+  import("./pages/AcceptInvite").then((m) => ({ default: m.AcceptInvite }))
+);
 const Dashboard = lazy(() =>
   import("./pages/Dashboard").then((m) => ({ default: m.Dashboard }))
 );
@@ -69,6 +72,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: lazyElement(<SignIn />) },
       { path: "forgot-password", element: lazyElement(<ForgotPassword />) },
+      { path: "accept-invite", element: lazyElement(<AcceptInvite />) },
     ],
   },
   {

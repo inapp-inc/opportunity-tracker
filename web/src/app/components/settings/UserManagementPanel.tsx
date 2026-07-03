@@ -28,6 +28,7 @@ export function UserManagementPanel() {
   const [tenants, setTenants] = useState<ApiTenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [newUser, setNewUser] = useState({
     name: "",
     email: "",
@@ -131,17 +132,17 @@ export function UserManagementPanel() {
   };
 
   const handleAddUser = async () => {
-    if (!newUser.email || !newUser.password) return;
+    if (!newUser.email) return;
     if (!newUser.tenantIds.length) {
       alert("Select at least one workspace for this user.");
       return;
     }
     try {
-      await apiFetch("/users", {
+      const result = await apiFetch<{ inviteToken?: string }>("/users", {
         method: "POST",
         body: JSON.stringify({
           email: newUser.email,
-          password: newUser.password,
+          ...(newUser.password ? { password: newUser.password } : {}),
           name: newUser.name,
           role: "VIEWER",
           memberships: newUser.tenantIds.map((tenantId) => ({
@@ -154,6 +155,10 @@ export function UserManagementPanel() {
       setIsUserModalOpen(false);
       await loadUsers();
       void loadAssignableUsers(true).catch(() => undefined);
+      if (result.inviteToken) {
+        const link = `${window.location.origin}${window.location.pathname.replace(/\/app.*/, "")}/accept-invite?token=${result.inviteToken}`;
+        setInviteLink(link);
+      }
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to create user");
     }
@@ -409,14 +414,20 @@ export function UserManagementPanel() {
             required
             placeholder="john@company.com"
           />
-          <Input
-            label="Password"
-            type="password"
-            value={newUser.password}
-            onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-            required
-            placeholder="••••••••"
-          />
+          <div>
+            <Input
+              label="Password (optional — leave blank to send an invite link)"
+              type="password"
+              value={newUser.password}
+              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+              placeholder="Leave blank to generate invite link"
+            />
+            {!newUser.password && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                An invite link will be generated. The user sets their own password when they first sign in.
+              </p>
+            )}
+          </div>
           <div>
             <p className="mb-2 text-sm font-medium">Workspace access and roles</p>
             <div className="max-h-48 space-y-2 overflow-auto rounded-lg border border-border p-3">
@@ -489,6 +500,35 @@ export function UserManagementPanel() {
                 );
               })}
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(inviteLink)}
+        onClose={() => setInviteLink(null)}
+        title="Invite link ready"
+        footer={
+          <Button onClick={() => setInviteLink(null)}>Done</Button>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Send this link to the user. It expires in 72 hours and can only be used once.
+          </p>
+          <div className="flex gap-2">
+            <input
+              readOnly
+              value={inviteLink || ""}
+              className="w-full rounded-md border border-input bg-muted px-3 py-2 text-xs font-mono"
+              onFocus={(e) => e.target.select()}
+            />
+            <Button
+              variant="outline"
+              onClick={() => void navigator.clipboard.writeText(inviteLink || "")}
+            >
+              Copy
+            </Button>
           </div>
         </div>
       </Modal>

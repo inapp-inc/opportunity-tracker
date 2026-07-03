@@ -1,5 +1,6 @@
 import express from 'express';
 import { createAuthRouter } from './auth.js';
+import { createInviteRouter } from './invite.js';
 import { createTenantsRouter } from './tenants.js';
 import { createUsersRouter } from './users.js';
 import { createOpportunitiesRouter } from './opportunities.js';
@@ -14,6 +15,7 @@ import { createSettingsRouter } from './settings.js';
 export function createApiRouter(deps) {
   const router = express.Router();
   router.use(createAuthRouter());
+  router.use(createInviteRouter());
   router.use(createTenantsRouter());
   router.use(createUsersRouter());
   router.use(createOpportunitiesRouter(deps));

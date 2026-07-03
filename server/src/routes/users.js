@@ -26,6 +26,7 @@ import {
   createOrUpdateMembership,
 } from '../services/membershipService.js';
 import { getPlatformRolesConfig } from '../services/configService.js';
+import { createInviteToken } from './invite.js';
 
 export function createUsersRouter() {
   const router = express.Router();
@@ -100,8 +101,8 @@ function createUserHandler(req, res) {
   const tenantIds = memberships.map((membership) => membership.tenantId);
   const tenantId = tenantIds[0] || DEFAULT_TENANT_ID;
   const platformRole = String(req.body?.platformRole || PLATFORM_ROLES.NONE);
-  if (!email || !password) {
-    return res.status(400).json({ message: 'email and password required' });
+  if (!email) {
+    return res.status(400).json({ message: 'email required' });
   }
   if (!['ADMIN', 'EDITOR', 'VIEWER'].includes(role)) {
     return res.status(400).json({ message: 'invalid role' });
@@ -114,19 +115,22 @@ function createUserHandler(req, res) {
   }
   const exists = db.prepare('SELECT id FROM users WHERE lower(email) = ?').get(email);
   if (exists) return res.status(409).json({ message: 'Email already exists' });
+
+  const useInvite = !password;
   const id = randomUUID();
   const now = nowIso();
   db.prepare(
     `INSERT INTO users (id, tenant_id, email, password_hash, name, role, platform_role, status, created_at, updated_at)
-     VALUES (@id, @tenant_id, @email, @password_hash, @name, @role, @platform_role, 'ACTIVE', @created_at, @updated_at)`
+     VALUES (@id, @tenant_id, @email, @password_hash, @name, @role, @platform_role, @status, @created_at, @updated_at)`
   ).run({
     id,
     tenant_id: tenantId,
     email,
-    password_hash: hashPassword(password),
+    password_hash: useInvite ? '' : hashPassword(password),
     name: name || email.split('@')[0],
     role,
     platform_role: platformRole,
+    status: useInvite ? 'PENDING' : 'ACTIVE',
     created_at: now,
     updated_at: now,
   });
@@ -142,6 +146,11 @@ function createUserHandler(req, res) {
        FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ?`
     )
     .get(id);
+
+  if (useInvite) {
+    const token = createInviteToken(id);
+    return res.status(201).json({ ...userToJson(row), inviteToken: token });
+  }
   res.status(201).json(userToJson(row));
 }
 
