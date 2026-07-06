@@ -201,7 +201,7 @@ export function ProspectGroupsPage() {
                 key={row.name}
                 className="cursor-pointer"
                 onClick={() =>
-                  navigate(`/app/prospect-groups/${encodeURIComponent(row.name)}`)
+                  navigate(`/app/prospect-groups/detail?prospect=${encodeURIComponent(row.name)}`)
                 }
               >
                 <TableCell className="font-medium">{row.name}</TableCell>

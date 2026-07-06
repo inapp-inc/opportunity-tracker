@@ -131,7 +131,7 @@ export const router = createBrowserRouter([
             ),
           },
           {
-            path: "prospect-groups/:prospect",
+            path: "prospect-groups/detail",
             element: lazyElement(
               <PageAccessGuard page="opportunities">
                 <ProspectGroupDetail />

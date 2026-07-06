@@ -309,7 +309,7 @@ export function useOpportunityForm(editId: string | undefined) {
   const selectProspectSuggestion = (name: string) => {
     setShowSuggestions(false);
     void apiFetch<{ items: ApiOpportunity[] }>(
-      `/prospect-groups/${encodeURIComponent(name)}/records`
+      `/prospect-groups/records?prospect=${encodeURIComponent(name)}`
     )
       .then((res) => {
         const items = res.items || [];

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   Eye,
   Plus,
@@ -51,8 +51,8 @@ function statusBadgeVariant(status: string): "default" | "info" | "success" {
 }
 
 export function ProspectGroupDetail() {
-  const { prospect: prospectParam } = useParams();
-  const prospectName = decodeURIComponent(prospectParam || "");
+  const [searchParams] = useSearchParams();
+  const prospectName = searchParams.get("prospect") || "";
   const canCreate = useCanCreateRecords();
 
   const [summary, setSummary] = useState<ProspectGroup | null>(null);
@@ -69,7 +69,7 @@ export function ProspectGroupDetail() {
         `/prospect-groups?q=${encodeURIComponent(prospectName)}`
       ),
       apiFetch<{ items: ApiOpportunity[] }>(
-        `/prospect-groups/${encodeURIComponent(prospectName)}/records`
+        `/prospect-groups/records?prospect=${encodeURIComponent(prospectName)}`
       ),
     ])
       .then(([groupsRes, recordsRes]) => {

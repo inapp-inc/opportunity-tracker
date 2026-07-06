@@ -57,11 +57,12 @@ router.get('/prospect-groups', requireTenantPermission(PERMISSIONS.RECORDS_READ)
 });
 
 router.get(
-  '/prospect-groups/:prospect/records',
+  '/prospect-groups/records',
   requireTenantPermission(PERMISSIONS.RECORDS_READ),
   (req, res) => {
     const tenantId = tenantIdFromReq(req);
-    const prospect = decodeURIComponent(req.params.prospect);
+    const prospect = String(req.query?.prospect || '').trim();
+    if (!prospect) return res.status(400).json({ message: 'prospect query param required' });
     const rows = db
       .prepare(
         `SELECT * FROM opportunities
